@@ -52,7 +52,7 @@ export default {
   version: 1,
   // 30 seeded runs (20261011..20261040), safe enchants, 4s walking + 60s
   // service: a=75 gave 10.410h; a=72 gives 10.001h (9.681..10.492h).
-  progression: { coefficient: 72, exponent: 2.15, maxLevel: 30, deathLoss: 0.05, lowLevelGap: 5, lowLevelRate: 0.3 },
+  progression: { coefficient: 104, exponent: 2.15, early: { untilLevel: 22, startFactor: 0.04, power: 2.5 }, maxLevel: 30, deathLoss: 0.05, lowLevelGap: 5, lowLevelRate: 0.3 },
   knight: { baseHp: 80, hpPerLevel: 16, atkDivisor: 2, defDivisor: 4, attackMs: 1000, regenBase: 2, regenDivisor: 4, regenMs: 3000 },
   combat: { playerHit: 0.8, monsterHit: 0.7, levelHit: 0.03, minHit: 0.3, maxHit: 0.95, minDamage: 1, weaponEnchantDamage: 2, monsterDefDivisor: 2, monsterAttackMs: 1200, bareMin: 1, bareMax: 1 },
   weapons, armors, consumables, monsters,
@@ -78,5 +78,5 @@ export default {
     { id: 'mine', name: '잿돌 폐광 입구', price: 100 },
   ],
   autohunt: { radiusTiles: 8, stuckSec: 3, potionHp: 0.5, returnHp: 0.2 },
-  simulation: { walkSec: 4, serviceSec: 60, potionStock: 200, seed: 20261011 },
+  simulation: { walkSec: 3, serviceSec: 60, potionStock: 200, seed: 20261011 },
 };

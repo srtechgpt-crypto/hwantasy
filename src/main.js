@@ -34,6 +34,8 @@ function showTitle() {
   const res = storage ? saveMod.loadSave(storage, bal) : { save: null, broken: [], warning: '이 브라우저는 저장을 막고 있습니다. 껐다 켜면 기록이 사라집니다.' };
   G.loaded = res;
   $('btnContinue').hidden = !res.save;
+  // 더 새 버전 기록이 있으면 이 버전으로는 시작하지 않는다(저장이 계속 실패해 멈추지 않게, 그 기록을 지키게)
+  if (res.future) $('titleButtons').hidden = true;
   const warns = [];
   if (G.lockedByOtherTab) warns.push('다른 창에서 이미 「환타지」가 열려 있습니다. 그 창을 닫고 다시 열어 주세요. 이 창에서는 저장하지 않습니다.');
   if (res.warning) warns.push(res.warning);

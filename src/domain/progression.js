@@ -2,7 +2,15 @@ import { assertLevel, integer, itemDef } from './common.js';
 
 export function needExp(level, bal) {
   assertLevel(level, bal);
-  return Math.round(bal.progression.coefficient * level ** bal.progression.exponent);
+  return Math.round(bal.progression.coefficient * level ** bal.progression.exponent * earlyFactor(level, bal));
+}
+// 초반 레벨은 필요 경험치를 줄여 빨리 오르게 한다: 1레벨 startFactor배 → untilLevel부터 1배.
+// power가 클수록 초반에 오래 낮게 머물다 untilLevel 가까이에서 빠르게 1배로 올라간다(power 1 = 직선)
+export function earlyFactor(level, bal) {
+  const e = bal.progression.early;
+  if (!e || level >= e.untilLevel) return 1;
+  const t = (level - 1) / (e.untilLevel - 1);
+  return e.startFactor + (1 - e.startFactor) * t ** (e.power ?? 1);
 }
 function assertProgress({ level, exp }, bal) {
   assertLevel(level, bal);

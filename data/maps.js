@@ -72,12 +72,12 @@ export const TINTS = {
 
 // 사냥 구역(칸). 보스 방은 따로
 export const ZONES = [
-  { id: 'fieldNear', mapId: 'field', x0: 28, x1: 52, y0: 3, y1: 40, monsters: ['jelly', 'mouse'], count: 14 },
-  { id: 'fieldFar', mapId: 'field', x0: 52, x1: 80, y0: 3, y1: 40, monsters: ['hopfrog', 'goblin'], count: 12 },
-  { id: 'forestNear', mapId: 'forest', x0: 88, x1: 110, y0: 3, y1: 40, monsters: ['raccoon', 'vine'], count: 12 },
-  { id: 'forestFar', mapId: 'forest', x0: 113, x1: 136, y0: 3, y1: 40, monsters: ['nightwing', 'vine'], count: 10 },
-  { id: 'mineNear', mapId: 'mine', x0: 144, x1: 166, y0: 3, y1: 40, monsters: ['crab', 'ember'], count: 12 },
-  { id: 'mineFar', mapId: 'mine', x0: 166, x1: 186, y0: 3, y1: 40, monsters: ['ember', 'stalker'], count: 10 },
+  { id: 'fieldNear', mapId: 'field', x0: 28, x1: 52, y0: 3, y1: 40, monsters: ['jelly', 'mouse'], count: 21 },
+  { id: 'fieldFar', mapId: 'field', x0: 52, x1: 80, y0: 3, y1: 40, monsters: ['hopfrog', 'goblin'], count: 18 },
+  { id: 'forestNear', mapId: 'forest', x0: 88, x1: 110, y0: 3, y1: 40, monsters: ['raccoon', 'vine'], count: 18 },
+  { id: 'forestFar', mapId: 'forest', x0: 113, x1: 136, y0: 3, y1: 40, monsters: ['nightwing', 'vine'], count: 15 },
+  { id: 'mineNear', mapId: 'mine', x0: 144, x1: 166, y0: 3, y1: 40, monsters: ['crab', 'ember'], count: 18 },
+  { id: 'mineFar', mapId: 'mine', x0: 166, x1: 186, y0: 3, y1: 40, monsters: ['ember', 'stalker'], count: 15 },
 ];
 
 function rng(seed) {

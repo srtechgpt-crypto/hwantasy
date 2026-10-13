@@ -1,7 +1,7 @@
 // 게임 화면: 지도, 기사, 몬스터·보스, NPC, 전투, 자동 사냥. 숫자 계산은 모두 domain 모듈에 맡긴다.
 // 시간: 전투·무적·재생성·땅 아이템·보스 방 초기화는 게임 시계(this.gt, 멈추면 안 흐름), 보스 재등장만 실제 시각(Date.now).
 import bal from '../../data/balance.js';
-import { buildWorld, TILE, W, H, mapIdAt, regionName, inBossRoom, BOSS_ROOM, NPCS, TINTS } from '../../data/maps.js';
+import { buildWorld, TILE, W, H, mapIdAt, regionName, inBossRoom, BOSS_ROOM, NPCS, TINTS, REGIONS } from '../../data/maps.js';
 import { makeRng } from '../domain/rng.js';
 import * as prog from '../domain/progression.js';
 import * as combat from '../domain/combat.js';
@@ -10,6 +10,8 @@ import * as inv from '../domain/inventory.js';
 import { bossRemainMs, bossReady, normalizeBossTime } from '../domain/boss.js';
 import { decideAuto } from '../domain/autohunt.js';
 import { createJoystick } from '../ui/joystick.js';
+import { createMinimap } from '../ui/minimap.js';
+import { loadPrefs, savePrefs } from '../ui/prefs.js';
 import { G, hud, josa } from '../state.js';
 
 const SPEED = 56;            // 기사 이동 속도(px/초)
@@ -19,7 +21,9 @@ const MON_RANGE = 15;
 const AGGRO = 4 * TILE;
 const RESPAWN_MS = 15000;
 const GROUND_ITEM_MS = 30000;
-const ACTIVE_RANGE = 26 * TILE; // 기사에서 이보다 먼 몬스터는 쉰다(폰 부담 줄이기)
+const ACTIVE_MIN = 26 * TILE; // 기사에서 이보다 먼 몬스터는 쉰다(폰 부담 줄이기). 화면이 넓으면 fitZoom이 늘린다
+const BIG_SCREEN = 1100;      // 짧은 변이 이보다 크면(태블릿·PC) 기본 3배, 그 밖(폰·폴드)은 기본 2배
+const AUTO_RESUME_MS = 400;   // 자동 사냥 중 조이스틱에서 손을 떼고 다시 자동으로 움직이기까지
 const TALK_RANGE = 1.7 * TILE;
 const DIRS = ['down', 'up', 'left', 'right'];
 const MON_KEYS = {
@@ -92,6 +96,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, W * TILE, H * TILE);
     this.cameras.main.startFollow(this.cameraTarget, true, 1, 1);
     this.smoothCamera();
+    this.prefs = loadPrefs();
     this.fitZoom();
     this.scale.on('resize', () => { this.fitZoom(); this.joy?.reset(); });
 
@@ -120,9 +125,16 @@ export class WorldScene extends Phaser.Scene {
 
     this.joy = createJoystick({
       zone: document.getElementById('game'),
-      onRelease: () => { this.autoResumeAt = this.gt + 3000; this.autoCenter = { x: this.knight.x, y: this.knight.y }; },
+      onRelease: () => { this.autoResumeAt = this.gt + AUTO_RESUME_MS; this.autoCenter = { x: this.knight.x, y: this.knight.y }; },
     });
     this.bindButtons();
+    this.minimap = createMinimap({
+      root: document.getElementById('hud'), wmap: this.wmap, regions: REGIONS, npcs: NPCS, bossRoom: BOSS_ROOM, tile: TILE,
+      onToggle: (open) => { this.prefs.mini = open; savePrefs(this.prefs); },
+    });
+    this.minimap.setOpen(this.prefs.mini);
+    this.miniT = 0;
+    this.refreshZoomButtons();
     G.onSceneReady?.();
   }
 
@@ -152,7 +164,15 @@ export class WorldScene extends Phaser.Scene {
 
   // 폐광: 기사 둘레만 밝은 어둠 그림(기사를 따라다님 — 좌표 변환 없음)
   makeDarkness() {
-    const w = 900, h = 600, tex = this.textures.createCanvas('dark', w, h), c = tex.getContext();
+    // 카메라가 지도 끝에 막혀 기사가 화면 가장자리에 있어도 덮이게 보이는 넓이의 2배 + 여유
+    const z = this.zoomZ || 1;
+    const w = Math.ceil(2 * this.scale.width / z) + 64, h = Math.ceil(2 * this.scale.height / z) + 64;
+    // 크기가 같으면 다시 만들지 않는다. 다시 만들면 진행 중인 페이드를 끊고 지금 지역에 맞는 밝기로 바로 맞춘다
+    if (this.dark && this.darkSize === `${w}x${h}`) return;
+    this.darkSize = `${w}x${h}`;
+    const alpha = this.region === 'mine' ? 1 : 0;
+    if (this.dark) { this.tweens.killTweensOf(this.dark); this.dark.destroy(); this.textures.remove('dark'); }
+    const tex = this.textures.createCanvas('dark', w, h), c = tex.getContext();
     const g = c.createRadialGradient(w / 2, h / 2, 16, w / 2, h / 2, 118);
     g.addColorStop(0, 'rgba(6,5,12,0)');
     g.addColorStop(0.3, 'rgba(6,5,12,0.3)');
@@ -160,7 +180,7 @@ export class WorldScene extends Phaser.Scene {
     g.addColorStop(1, 'rgba(6,5,12,0.9)');
     c.fillStyle = g; c.fillRect(0, 0, w, h);
     tex.refresh();
-    this.dark = this.add.image(0, 0, 'dark').setDepth(975).setAlpha(0);
+    this.dark = this.add.image(this.snap(this.knight?.x ?? 0), this.snap((this.knight?.y ?? 8) - 8), 'dark').setDepth(975).setAlpha(alpha);
   }
 
   makeNpcs() {
@@ -197,10 +217,26 @@ export class WorldScene extends Phaser.Scene {
   }
 
   fitZoom() {
-    // 정수 배율이어야 도트가 흔들리지 않는다. 폰 가로(높이 약 400)에서 3배 = 세로 약 8.5칸.
-    const z = Math.max(2, Math.round(this.scale.height / (8.5 * TILE)));
+    // 정수 배율이어야 도트가 흔들리지 않는다. '보통' = 폰·폴드 2배(폰 915×412 → 약 29×13칸, 폴드7 펼침 약 832×750 → 약 26×23칸),
+    // 짧은 변 1100 이상인 큰 화면만 3배. 멀리 −1 / 가까이 +1 → 폰·폴드는 1·2·3배.
+    const w = this.scale.width, h = this.scale.height;
+    const base = Math.min(w, h) >= BIG_SCREEN ? 3 : 2;
+    const z = Math.min(6, Math.max(1, base + (this.prefs?.zoom ?? 0)));
     this.zoomZ = z;
     this.cameras.main.setZoom(z);
+    // 화면이 넓어지면 보이는 몬스터가 쉬지 않게(화면 대각선 전체 + 2칸), 폐광 어둠도 화면을 덮게 다시 만든다
+    this.activeRange = Math.max(ACTIVE_MIN, Math.hypot(w / z, h / z) + 2 * TILE);
+    if (this.dark) this.makeDarkness();
+    this.minimap?.resize();
+  }
+
+  setZoomPref(v) {
+    this.prefs.zoom = v; savePrefs(this.prefs);
+    this.fitZoom(); this.refreshZoomButtons();
+  }
+
+  refreshZoomButtons() {
+    for (const [id, v] of [['zoomFar', -1], ['zoomMid', 0], ['zoomNear', 1]]) document.getElementById(id)?.classList.toggle('on', this.prefs.zoom === v);
   }
 
   // 화면 끊김 방지: Phaser의 roundPixels는 카메라 위치를 그림 1칸(=화면 3픽셀) 단위로 내려서
@@ -306,6 +342,10 @@ export class WorldScene extends Phaser.Scene {
     });
     ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => atk.addEventListener(t, () => { this.attackHeld = false; }));
     on('btnPotion', () => this.drinkPotion(true));
+    // 메뉴의 화면 크기(메뉴가 열려 있어 게임은 멈춘 상태)
+    for (const [id, v] of [['zoomFar', -1], ['zoomMid', 0], ['zoomNear', 1]]) {
+      document.getElementById(id)?.addEventListener('click', () => this.setZoomPref(v));
+    }
     on('btnReturn', () => this.useReturn('직접'));
     on('btnAuto', () => {
       if (G.auto) { this.setAuto(false); return; }
@@ -435,6 +475,14 @@ export class WorldScene extends Phaser.Scene {
       const fixed = normalizeBossTime(G.save, Date.now());
       if (fixed !== G.save) { G.save = fixed; G.persist('bossTime'); }
       this.trySpawnBoss(); this.updateBossSign();
+    }
+
+    // 미니맵은 0.25초마다(접혀 있으면 그리지 않음)
+    this.miniT += dtMs;
+    if (this.miniT >= 250) {
+      this.miniT = 0;
+      this.minimap.setRegion(mapIdAt(this.knight.x));
+      this.minimap.draw(this.knight, this.monsters);
     }
 
     this.autoSaveT += dt;
@@ -733,7 +781,7 @@ export class WorldScene extends Phaser.Scene {
     for (const m of this.monsters) {
       if (!m.alive) { if (!m.def.isBoss && now >= m.respawnAt) this.respawn(m); continue; }
       const dx = this.knight.x - m.sprite.x, dy = this.knight.y - m.sprite.y, d = Math.hypot(dx, dy);
-      if (!m.def.isBoss && d > ACTIVE_RANGE) { // 먼 몬스터는 움직임·그리기·애니메이션 모두 쉰다
+      if (!m.def.isBoss && d > this.activeRange) { // 먼 몬스터는 움직임·그리기·애니메이션 모두 쉰다
         if (!m.asleep) { m.asleep = true; m.aggro = false; m.sprite.anims.pause(); m.sprite.setVisible(false); m.bar.clear(); }
         continue;
       }
