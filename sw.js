@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "c161ea7bc407";
+const VERSION = "7d5d4fa368eb";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -42,14 +42,14 @@ const FILES = {
   "assets/sword.png": "5fe1e6d57b0ce79769c8760bafec94bc6c047027ea32e3da2722a42a689628bc",
   "assets/tiles.png": "aa2708aa07cabda86f02d65bf2095a6b53b96fdfd43cf191931689f517f284a4",
   "assets/출처.txt": "f8ad6df571f7bfeef8a583323fe40ae6ee01cfc95c528e00148ff1a132c0f4c0",
-  "data/balance.js": "bcf0d162384c2f0e9a0658b97826c0f9f4b65f2bf97566dd4290bb6ee5df3d68",
+  "data/balance.js": "5348cda3dcb11e7bd048819f715e610975a70fcb5cd8f0249cce9b86d6305d70",
   "data/maps.js": "96f48089454cdd402ab789a4e1e44c2ee3aadebbaf3a5ef3444a0b05c72d35ad",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
   "icons/icon-maskable-512.png": "d209bbef68bf9c836b7675a99c297b45d7ec2d55a4b75736f042870ddd8e567d",
   "index.html": "ad3bc0595ca42f5ab65645a6bf70aeecaf05814efd08ab4f431681c243838480",
   "manifest.webmanifest": "e52e09ae050d75862cd4048e27a0480f2a2e128b32557c4debb4160aa3809f8e",
-  "src/domain/autohunt.js": "cf92b79d51a64ab7e28f8a7be2370ad2dc059cad3138eba28b6660caba78c683",
+  "src/domain/autohunt.js": "7d087b2a2f14042759b094366aa2940d641163e5a03db0f9dfefe556d383fd45",
   "src/domain/boss.js": "b790e89be265778080875009b3fd37f19b7714d4f6c73cb06308126e5e34ff33",
   "src/domain/combat.js": "884d1b2605e68ef7afe1da870a86e2d541df1ccd2dbc0ced16bd9e55688fdf67",
   "src/domain/common.js": "c9729e11b2dd0360681512295716a92ead34d70e33174400476bce220cd1c75a",
@@ -60,7 +60,7 @@ const FILES = {
   "src/domain/rng.js": "8ebeafdafd410bd9b3a4ca4965873bb7aec94204026292ee609c9aa5c406b29a",
   "src/domain/save.js": "72fa119fd88706c440b6da1cd14c6f383425a5f89fe9846b6e2967d2a770610a",
   "src/main.js": "1d88762aa377c3c40cf06fdb01e63e3789c9d8747264f9ffeb342103b284ad12",
-  "src/scenes/World.js": "5ad19857e4fdb4b6385a94ab0d927624f55dadd626dbcef16151a9954a890e14",
+  "src/scenes/World.js": "3bc58ad05f2f544c157c26d26e630f29789236fa9052db4c6b7fec9330b827e3",
   "src/state.js": "892d9e7f7fcdd202005afbd54eae89ea5b627ecd436d0e341b01f6de7bec4814",
   "src/ui/hud.css": "9334d830f10877862885b240ef87a85f409c2117a7ee7fca163e08419159e40b",
   "src/ui/joystick.js": "2b5ee6b05b97fd918a4f451cf9618efb0e3a957018c1eee936712324074b02c4",

@@ -14,13 +14,15 @@ import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
 import { G, hud, josa } from '../state.js';
 
-const SPEED = 56;            // 기사 이동 속도(px/초)
+const SPEED = 70;            // 기사 이동 속도(px/초) — 2026-10-13 대표님 의견으로 56→70
 const MON_SPEED = 30;
 const ATTACK_RANGE = 20;
 const MON_RANGE = 15;
 const AGGRO = 4 * TILE;
 const RESPAWN_MS = 15000;
-const GROUND_ITEM_MS = 30000;
+const GROUND_ITEM_MS = 60000; // 땅에 떨어진 돈·아이템이 남는 시간(게임 시계)
+const PICKUP_RANGE = 12;      // 기사 발이 이만큼 가까우면 줍는다(px)
+const ITEM_SKIP_MS = 20000;   // 자동 사냥이 3초 동안 다가가지 못한 떨어진 것은 이 시간 동안 건너뜀
 const ACTIVE_MIN = 26 * TILE; // 기사에서 이보다 먼 몬스터는 쉰다(폰 부담 줄이기). 화면이 넓으면 fitZoom이 늘린다
 const BIG_SCREEN = 1100;      // 짧은 변이 이보다 크면(태블릿·PC) 기본 3배, 그 밖(폰·폴드)은 기본 2배
 const AUTO_RESUME_MS = 400;   // 자동 사냥 중 조이스틱에서 손을 떼고 다시 자동으로 움직이기까지
@@ -63,6 +65,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.image('tiles', 'assets/tiles.png');
     this.load.spritesheet('hero', 'assets/hero.png', { frameWidth: HERO_FRAME, frameHeight: HERO_FRAME });
     this.load.image('sword', 'assets/sword.png');
+    this.load.image('coin', 'assets/coin.png');
     this.load.spritesheet('fx_return', 'assets/fx_return.png', { frameWidth: 32, frameHeight: 32 });
     for (const key of Object.values(MON_KEYS)) this.load.spritesheet(key, `assets/${key}.png`, { frameWidth: 16, frameHeight: 16 });
     for (const n of NPCS) this.load.spritesheet(`npc_${n.id}`, `assets/npc_${n.id}.png`, { frameWidth: 16, frameHeight: 16 });
@@ -105,6 +108,8 @@ export class WorldScene extends Phaser.Scene {
 
     this.monsters = [];
     this.groundItems = [];
+    this.dropSeq = this.dropSeq ?? 0;
+    this.autoItem = null;
     this.boss = null;
     this.bossAway = 0;
     this.slam = null;
@@ -360,7 +365,7 @@ export class WorldScene extends Phaser.Scene {
   setAuto(onOff) {
     G.auto = onOff;
     hud.setAuto(onOff);
-    if (onOff) { this.autoCenter = { x: this.knight.x, y: this.knight.y }; this.autoTarget = null; this.autoResumeAt = 0; }
+    if (onOff) { this.autoCenter = { x: this.knight.x, y: this.knight.y }; this.autoTarget = null; this.autoItem = null; this.autoResumeAt = 0; }
   }
 
   // ---------- 몬스터 ----------
@@ -368,8 +373,9 @@ export class WorldScene extends Phaser.Scene {
     for (const m of this.monsters) { m.sprite.destroy(); m.bar.destroy(); m.label?.destroy(); }
     this.monsters = [];
     this.boss = null;
-    for (const g of this.groundItems) g.sprite.destroy();
+    for (const g of this.groundItems) { this.tweens.killTweensOf(g.sprite); g.sprite.destroy(); }
     this.groundItems = [];
+    this.autoItem = null;
   }
 
   spawnAll() {
@@ -555,6 +561,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   killMonster(m) {
+    if (!m.alive) return; // 같은 처치로 보상이 두 번 나오지 않게
     m.alive = false;
     m.respawnAt = this.gt + RESPAWN_MS;
     m.sprite.setVisible(false); m.bar.clear();
@@ -565,21 +572,15 @@ export class WorldScene extends Phaser.Scene {
     const before = s.player.level;
     const r = prog.addExp({ level: s.player.level, exp: s.player.exp }, rw.exp, bal);
     s.player.level = r.level; s.player.exp = r.exp;
-    s.player.gold = Math.min(Number.MAX_SAFE_INTEGER, s.player.gold + rw.gold);
-    const got = [];
-    for (const d of rw.drops) {
-      const res = inv.addItem(G.save, d.id, d.count, bal);
-      if (res.ok) G.save = res.save;
-      const placed = d.count - (res.ok ? res.overflow ?? 0 : d.count);
-      if (placed > 0) got.push(`${nameOf(d.id)}${placed > 1 ? ` ${placed}개` : ''}`);
-      const left = d.count - placed;
-      if (left > 0) this.dropOnGround(d.id, left, m.sprite.x, m.sprite.y);
-    }
-    hud.log(`${m.def.name} 처치 · 경험치 +${rw.exp.toLocaleString('ko-KR')} · 돈 +${rw.gold.toLocaleString('ko-KR')}${got.length ? ` · ${got.join(', ')}` : ''}`);
+    // 돈·아이템은 리니지처럼 그 자리에 떨어뜨린다(지나가면 줍고, 저장에 성공해야 확정)
+    const mx = m.sprite.x, my = m.sprite.y;
+    if (rw.gold > 0) this.dropOnGround('gold', 'gold', rw.gold, mx, my);
+    for (const d of rw.drops) this.dropOnGround('item', d.id, d.count, mx, my);
+    hud.log(`${m.def.name} 처치 · 경험치 +${rw.exp.toLocaleString('ko-KR')}${rw.drops.length ? ` · <span style="color:#ffe08a">${rw.drops.map((d) => nameOf(d.id)).join(', ')}이(가) 떨어졌습니다</span>` : ''}`);
     if (r.level > before) {
       this.levelUpFx(r.level);
       G.persist('levelup');
-    } else if (got.length) G.persist('drop');
+    }
   }
 
   // 보스: 보상 전부 + 처치 시각을 한 후보로 만들어 한 번에 저장(성공해야 확정)
@@ -601,7 +602,8 @@ export class WorldScene extends Phaser.Scene {
         const list = (arr) => arr.map((d) => `${nameOf(d.id)}${d.count > 1 ? ` ${d.count}개` : ''}`).join(', ');
         hud.log(`<b style="color:#ffd36a">${b.def.name} 처치!</b> 경험치 +${rw.exp.toLocaleString('ko-KR')} · 돈 +${rw.gold.toLocaleString('ko-KR')}${res.toBag.length ? ` · ${list(res.toBag)}` : ''}`);
         if (res.toWarehouse.length) hud.log(`<span style="color:#9fd8ff">가방이 가득해 ${josa(list(res.toWarehouse), '은/는')} 창고지기에게 맡겨 두었습니다</span>`);
-        for (const d of res.ground) this.dropOnGround(d.id, d.count, x, y);
+        for (const d of res.ground) this.dropOnGround('item', d.id, d.count, x, y);
+        if (res.ground.length) hud.toast('가방과 창고가 가득 찼습니다. 남은 것은 땅에 60초 동안 남습니다');
         if (res.levelsGained > 0) { this.levelUpFx(G.save.player.level); G.persist('levelup'); }
         this.updateBossSign();
       },
@@ -622,28 +624,73 @@ export class WorldScene extends Phaser.Scene {
     s.play('fx_smoke'); s.once('animationcomplete', () => s.destroy());
   }
 
-  dropOnGround(id, count, x, y) {
-    const sprite = this.add.image(x + (Math.random() - 0.5) * 10, y, `ic_${id}`).setDepth(9).setScale(0.7);
-    this.groundItems.push({ id, count, sprite, until: this.gt + GROUND_ITEM_MS });
-    hud.toast('가방이 가득 찼습니다. 아이템이 땅에 30초 동안 남습니다');
+  // kind: 'gold'(id 'gold', count=금액) 또는 'item'. 몬스터 둘레에 톡 튀어 떨어진다
+  dropOnGround(kind, id, count, x, y) {
+    const ang = Math.random() * Math.PI * 2, r = 4 + Math.random() * 8;
+    let tx = x + Math.cos(ang) * r, ty = y + Math.sin(ang) * r * 0.7;
+    if (this.blocked(tx, ty)) { tx = x; ty = y; }
+    const sprite = kind === 'gold'
+      ? this.add.image(x, y, 'coin').setScale(count >= 100 ? 2.4 : 1.9)
+      : this.add.image(x, y, `ic_${id}`).setScale(0.75);
+    sprite.setDepth(9);
+    this.tweens.add({ targets: sprite, x: tx, duration: 260, ease: 'Linear' });
+    this.tweens.add({ targets: sprite, y: { from: y - 2, to: ty }, duration: 260, ease: 'Bounce.easeOut' });
+    this.groundItems.push({ uid: ++this.dropSeq, kind, id, count, sprite, x: tx, y: ty, until: this.gt + GROUND_ITEM_MS, skipUntil: 0 });
   }
 
+  // 가방에 들어갈 수 있는지(돈은 항상). G.save가 바뀔 때만 다시 계산
+  canAccept(g) {
+    if (g.kind === 'gold') return G.save.player.gold < Number.MAX_SAFE_INTEGER;
+    if (this.acceptCache?.save !== G.save) this.acceptCache = { save: G.save, map: new Map() };
+    const c = this.acceptCache.map;
+    if (!c.has(g.id)) { const r = inv.addItem(G.save, g.id, 1, bal); c.set(g.id, !!r.ok && !(r.overflow > 0)); }
+    return c.get(g.id);
+  }
+
+  // 지나가면 줍기: 이번 프레임에 닿은 것을 한 번에 저장 후보로 만들고, 저장에 성공해야 땅에서 없앤다
   updateGroundItems(now) {
     if (G.pending) return;
     for (const g of [...this.groundItems]) {
-      if (now > g.until) { g.sprite.destroy(); this.groundItems.splice(this.groundItems.indexOf(g), 1); continue; }
+      if (now > g.until) { this.removeDrop(g); continue; }
       g.sprite.setAlpha(g.until - now < 5000 ? 0.4 + 0.4 * Math.sin(now / 120) : 1);
-      if (Math.hypot(g.sprite.x - this.knight.x, g.sprite.y - this.knight.y) < 10) {
-        const res = inv.addItem(G.save, g.id, g.count, bal);
+    }
+    const near = this.groundItems.filter((g) => Math.hypot(g.x - this.knight.x, g.y - this.knight.y) < PICKUP_RANGE);
+    if (!near.length) return;
+    let cand = G.save;
+    const took = [];
+    for (const g of near) {
+      if (g.kind === 'gold') {
+        // 돈 상한(MAX_SAFE_INTEGER)까지만 받고 나머지는 땅에 남긴다
+        const n = Math.min(g.count, Number.MAX_SAFE_INTEGER - cand.player.gold);
+        if (n > 0) { cand = { ...cand, player: { ...cand.player, gold: cand.player.gold + n } }; took.push({ g, n }); }
+      } else {
+        const res = inv.addItem(cand, g.id, g.count, bal);
         const placed = res.ok ? g.count - (res.overflow ?? 0) : 0;
-        if (placed > 0) {
-          G.save = res.save; g.count -= placed;
-          hud.log(`${josa(nameOf(g.id), '을/를')} 주웠습니다`);
-          if (g.count <= 0) { g.sprite.destroy(); this.groundItems.splice(this.groundItems.indexOf(g), 1); }
-          G.persist('pickup');
-        }
+        if (placed > 0) { cand = res.save; took.push({ g, n: placed }); }
       }
     }
+    if (!took.length) {
+      if (!this.bagFullToastAt || now - this.bagFullToastAt > 8000) { this.bagFullToastAt = now; hud.toast('가방이 가득 차서 주울 수 없습니다'); }
+      return;
+    }
+    G.commit(cand, 'pickup', {
+      after: () => {
+        for (const { g, n } of took) {
+          g.count -= n;
+          if (g.kind === 'gold') this.floatText(this.knight.x, this.knight.y - 20, `+${n.toLocaleString('ko-KR')}원`, '#ffd36a', 900);
+          else { this.floatText(this.knight.x, this.knight.y - 26, nameOf(g.id), '#ffffff', 1100); hud.log(`${josa(nameOf(g.id), '을/를')} 주웠습니다`); }
+          if (g.count <= 0) this.removeDrop(g);
+        }
+        this.refreshHud(true);
+      },
+    });
+  }
+
+  removeDrop(g) {
+    const i = this.groundItems.indexOf(g);
+    if (i >= 0) this.groundItems.splice(i, 1);
+    this.tweens.killTweensOf(g.sprite); g.sprite.destroy();
+    if (this.autoItem === g.uid) this.autoItem = null;
   }
 
   drinkPotion(manual) {
@@ -731,10 +778,24 @@ export class WorldScene extends Phaser.Scene {
       monsters: this.monsters.map((m) => ({ id: m.uid, x: m.sprite.x, y: m.sprite.y, alive: m.alive, isBoss: !!m.def.isBoss })),
       targetId: this.autoTarget,
       stuckSec: this.stuck.id === this.autoTarget ? this.stuck.sec : 0,
+      items: this.groundItems.filter((g) => g.skipUntil <= this.gt && this.canAccept(g)).map((g) => ({ id: g.uid, x: g.x, y: g.y })),
+      itemId: this.autoItem,
     };
     const a = decideAuto(ctx, bal);
     const tgt = a.targetId ? this.monsters.find((m) => m.uid === a.targetId) : null;
     this.autoTarget = a.targetId ?? (a.action === 'move' && a.x !== undefined ? null : this.autoTarget);
+    this.autoItem = a.itemId ?? null;
+    if (a.itemId) {
+      // 떨어진 것 주우러 가기: 3초 동안 다가가지 못하면(벽 너머 등) 잠시 건너뜀
+      const g = this.groundItems.find((it) => it.uid === a.itemId);
+      if (!g) return false;
+      const d = Math.hypot(g.x - this.knight.x, g.y - this.knight.y);
+      if (this.itemStuck?.id !== g.uid) this.itemStuck = { id: g.uid, best: d, sec: 0 };
+      else if (d < this.itemStuck.best - 1) { this.itemStuck.best = d; this.itemStuck.sec = 0; }
+      else this.itemStuck.sec += dt;
+      if (this.itemStuck.sec >= bal.autohunt.stuckSec) { g.skipUntil = this.gt + ITEM_SKIP_MS; this.autoItem = null; this.itemStuck = null; return false; }
+      return this.walkTo(g.x, g.y, dt, 2);
+    }
 
     switch (a.action) {
       case 'potion': this.drinkPotion(false); return false;
