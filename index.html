@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14161f">
+<title>환타지</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="src/ui/hud.css">
+</head>
+<body>
+<div id="game"></div>
+
+<!-- 위 상태줄 -->
+<div class="hud" id="hud" hidden>
+  <div class="hud-left">
+    <span class="lv" id="hudLv">Lv 1</span>
+    <div class="meter hp"><i id="hudHpBar"></i><span id="hudHp">80/80</span></div>
+    <div class="meter exp"><i id="hudExpBar"></i><span id="hudExp">0.00%</span></div>
+    <span class="gold"><b class="coin"></b><span id="hudGold">0</span></span>
+  </div>
+  <div class="hud-right">
+    <span class="place" id="hudPlace">바람 마을</span>
+    <button class="small" id="btnBag" type="button">가방</button>
+    <button class="small" id="btnMenu" type="button">메뉴</button>
+  </div>
+</div>
+<div class="log" id="log"></div>
+<div class="toast" id="toast" hidden></div>
+
+<!-- 아래 버튼 -->
+<div class="pad" id="pad" hidden>
+  <button class="round" id="btnReturn" type="button">귀환<small id="cntReturn">3</small></button>
+  <button class="round" id="btnPotion" type="button">물약<small id="cntPotion">30</small></button>
+  <button class="round auto" id="btnAuto" type="button">자동<small id="autoState">꺼짐</small></button>
+  <button class="round big" id="btnAttack" type="button">공격</button>
+</div>
+
+<!-- 창(가방·상점·창고·강화·순간이동): 열려 있으면 게임 멈춤 -->
+<div class="screen dim" id="win" hidden>
+  <div class="wpanel" role="dialog" aria-labelledby="winTitle">
+    <div class="whead">
+      <img class="wicon" id="winIcon" alt="">
+      <h2 id="winTitle">가방</h2>
+      <div class="tabs" id="winTabs"></div>
+      <button class="small close" id="winClose" type="button">닫기</button>
+    </div>
+    <div class="wbody" id="winBody"></div>
+    <div class="wfoot"><span class="gold"><b class="coin"></b><span id="winGold">0</span></span><span class="wmsg" id="winMsg"></span></div>
+  </div>
+</div>
+
+<!-- 시작 화면 -->
+<div class="screen" id="title" hidden>
+  <div class="title-box">
+    <h1>환타지</h1>
+    <p class="sub">바람 마을에서 시작하는 기사의 모험</p>
+    <div class="col" id="titleButtons">
+      <button class="wide" id="btnContinue" type="button">이어하기</button>
+      <button class="wide ghost" id="btnNew" type="button">새로 하기</button>
+    </div>
+    <div class="confirm" id="newConfirm" hidden>
+      <p id="newConfirmText">저장된 기사가 지워집니다. 정말 새로 할까요?</p>
+      <div class="row">
+        <button class="wide danger" id="btnNewYes" type="button">지우고 새로 하기</button>
+        <button class="wide ghost" id="btnNewNo" type="button">그만두기</button>
+      </div>
+    </div>
+    <p class="warn" id="titleWarn" hidden></p>
+    <p class="fine">게임 기록은 이 폰 브라우저 안에만 저장됩니다. 브라우저 데이터를 지우면 함께 사라지니, 메뉴의 "저장 내보내기"로 따로 보관해 두세요.</p>
+  </div>
+</div>
+
+<!-- 메뉴 -->
+<div class="screen dim" id="menu" hidden>
+  <div class="panel">
+    <h2>메뉴</h2>
+    <div class="col">
+      <button class="wide" id="btnResume" type="button">게임으로 돌아가기</button>
+      <button class="wide ghost" id="btnSaveNow" type="button">지금 저장</button>
+      <button class="wide ghost" id="btnExport" type="button">저장 내보내기</button>
+      <button class="wide ghost" id="btnImport" type="button">저장 가져오기</button>
+      <button class="wide ghost" id="btnToTitle" type="button">처음 화면으로</button>
+    </div>
+    <div class="io" id="ioBox" hidden>
+      <p id="ioHelp"></p>
+      <textarea id="ioText" rows="4" spellcheck="false"></textarea>
+      <div class="row">
+        <button class="wide" id="ioAction" type="button">복사</button>
+        <button class="wide ghost" id="ioClose" type="button">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 저장 실패 -->
+<div class="screen dim" id="saveFail" hidden>
+  <div class="panel">
+    <h2>저장하지 못했습니다</h2>
+    <p id="saveFailText">폰 저장 공간이 부족하거나 브라우저가 저장을 막았습니다. 방금 한 일은 되돌렸습니다.</p>
+    <div class="row">
+      <button class="wide" id="btnRetrySave" type="button">다시 시도</button>
+      <button class="wide ghost" id="btnCancelSave" type="button" hidden>그만두기</button>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="rotate"><p>폰을 가로로 돌려 주세요</p></div>
+<div class="screen" id="loading"><p>불러오는 중…</p></div>
+
+<script src="vendor/phaser.min.js"></script>
+<script type="module" src="src/main.js"></script>
+<script>
+(() => {
+  "use strict";
+  try {
+    if (!(isSecureContext && "serviceWorker" in navigator &&
+        (location.hostname.endsWith("github.io") || location.hostname === "localhost" ||
+         location.hostname === "127.0.0.1"))) return;
+
+    const PREPARING = "오프라인 준비 중…";
+    const UNAVAILABLE = "오프라인 준비 안 됨 — 인터넷 연결 후 다시 열어 주세요";
+    let registration = null;
+    let hadController = !!navigator.serviceWorker.controller;
+    let lastUpdate = -Infinity;
+    let applying = false;
+    let checking = false;
+    let reloading = false;
+    // 게임을 시작하기 전(불러오는 중·시작 화면)만 새로고침해도 안전하다
+    const safe = () => !!(window.__hw && !window.__hw.started);
+
+    function show(text) {
+      try {
+        const panel = document.querySelector("#title .title-box");
+        if (!panel) return;
+        let state = document.getElementById("offlineState");
+        if (!state) {
+          state = document.createElement("div");
+          state.id = "offlineState";
+          state.style.fontSize = "13px";
+          state.style.color = "#a99f88";
+          state.style.margin = "0";
+          state.setAttribute("role", "status");
+          panel.appendChild(state);
+        }
+        state.textContent = text;
+      } catch (_) {}
+    }
+
+    function message(worker, command) {
+      return new Promise((resolve, reject) => {
+        let channel;
+        let timer;
+        const finish = (error, data) => {
+          clearTimeout(timer);
+          if (channel) { channel.port1.close(); channel.port2.close(); }
+          if (error) reject(error); else resolve(data);
+        };
+        try {
+          if (!worker) throw new Error("서비스 워커 없음");
+          channel = new MessageChannel();
+          timer = setTimeout(() => finish(new Error("서비스 워커 응답 시간 초과")), 5000);
+          channel.port1.onmessage = event => finish(null, event.data);
+          channel.port1.onmessageerror = () => finish(new Error("서비스 워커 응답 오류"));
+          worker.postMessage(command, [channel.port2]);
+        } catch (error) { finish(error); }
+      });
+    }
+
+    async function status() {
+      if (checking) return;
+      checking = true;
+      try {
+        const worker = navigator.serviceWorker.controller || (registration && registration.active);
+        if (!worker) {
+          show(!registration || registration.installing ? PREPARING : UNAVAILABLE);
+          return;
+        }
+        const data = await message(worker, "status");
+        if (worker !== (navigator.serviceWorker.controller || (registration && registration.active))) return;
+        show(data.ready ? "오프라인 준비 완료 · v" + data.version.slice(0, 6) : UNAVAILABLE);
+      } catch (_) { show(UNAVAILABLE); }
+      finally { checking = false; }
+    }
+
+    function lockStart(on) {
+      try {
+        for (const id of ["btnContinue", "btnNew", "btnNewYes"]) {
+          const el = document.getElementById(id);
+          if (el) el.disabled = on;
+        }
+        if (on) show("새 버전으로 바꾸는 중…");
+      } catch (_) {}
+    }
+
+    async function applyWaiting() {
+      if (applying || reloading || !registration || !registration.waiting || !safe()) return;
+      applying = true;
+      try {
+        const worker = registration.waiting;
+        const data = await message(worker, "status");
+        if (data.ready && worker === registration.waiting && safe()) {
+          // 교체하는 동안 게임을 시작하지 못하게 시작 버튼을 잠근다(적용되면 곧 새로고침)
+          lockStart(true);
+          const result = await message(worker, "apply");
+          if (!result || !result.applied) lockStart(false);
+          else setTimeout(() => { if (!reloading) lockStart(false); }, 10000);
+        }
+      } catch (_) { lockStart(false); }
+      finally { applying = false; }
+    }
+
+    async function update() {
+      try {
+        // 인터넷이 없으면 확인하지 않아요(비행기 모드에서 콘솔 오류 방지)
+        if (!registration || navigator.onLine === false || performance.now() - lastUpdate < 60000) return;
+        lastUpdate = performance.now();
+        await registration.update();
+      } catch (_) {}
+      finally { await status(); await applyWaiting(); }
+    }
+
+    async function controllerChanged() {
+      const existed = hadController;
+      hadController = !!navigator.serviceWorker.controller;
+      try {
+        const worker = navigator.serviceWorker.controller;
+        if (existed && worker && safe() && !reloading) {
+          const data = await message(worker, "status");
+          if (data.ready && safe() && worker === navigator.serviceWorker.controller) {
+            const key = "hwantasy-reloaded-" + data.version;
+            // 같은 버전으로 두 번 새로고침하지 않게 표시한다. sessionStorage를 못 쓰면 그래도 한 번은 새로고침한다
+            // (controllerchange는 버전이 바뀔 때만 오므로 무한 새로고침이 되지 않는다)
+            let seen = false;
+            try { seen = !!sessionStorage.getItem(key); sessionStorage.setItem(key, "1"); } catch (_) {}
+            if (!seen) {
+              reloading = true;
+              location.reload();
+              return;
+            }
+          }
+        }
+      } catch (_) {}
+      await status();
+      await applyWaiting();
+    }
+
+    async function start() {
+      show(PREPARING);
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          Promise.resolve(navigator.storage.persist()).catch(() => {});
+        }
+      } catch (_) {}
+      try {
+        navigator.serviceWorker.addEventListener("controllerchange", () => { controllerChanged().catch(() => {}); });
+        registration = await navigator.serviceWorker.register("./sw.js", {scope: "./", updateViaCache: "none"});
+        const watch = worker => {
+          try {
+            if (!worker) return;
+            worker.addEventListener("statechange", () => {
+              status().catch(() => {});
+              applyWaiting().catch(() => {});
+            });
+          } catch (_) {}
+        };
+        registration.addEventListener("updatefound", () => { watch(registration.installing); });
+        watch(registration.installing);
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") update().catch(() => {});
+        });
+        window.addEventListener("online", () => { update().catch(() => {}); });
+        // Retry a deferred application when the player returns to title/select
+        // or another window closes; polling never calls registration.update().
+        setInterval(() => { status().catch(() => {}); applyWaiting().catch(() => {}); }, 1500);
+        await status();
+        await applyWaiting();
+        await update();
+      } catch (_) { show(UNAVAILABLE); }
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => { start().catch(() => { show(UNAVAILABLE); }); }, {once: true});
+    } else { start().catch(() => { show(UNAVAILABLE); }); }
+  } catch (_) {}
+})();
+</script>
+</body>
+</html>

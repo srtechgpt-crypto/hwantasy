@@ -1,0 +1,10 @@
+그림: Ninja Adventure Asset Pack — Pixel-boy / Sparklin Labs
+라이선스: CC0 (출처 표기 불필요, 상업 사용 가능)
+https://github.com/sparklinlabs/superpowers-asset-packs
+
+기사(hero.png): PixelLab(pixellab.ai) AI 생성 「금발 기사」 (2026-10-13, 캐릭터 id 0a409b3c-5161-40dd-8956-25e769d9cbdf)
+  — PixelLab 이용약관상 생성 그림 상업 사용 허용. 원본 프레임·조립 스크립트: 그림원본\pixellab_금발기사\
+  (예전 기사: Puny Characters — Shade (CC0), Soldier-Red, https://opengameart.org/content/puny-characters)
+
+칼(sword.png, 지금은 숨김): 16x16 DungeonTileset II — 0x72 (CC0)
+https://0x72.itch.io/dungeontileset-ii
