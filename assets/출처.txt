@@ -8,3 +8,4 @@ https://github.com/sparklinlabs/superpowers-asset-packs
 
 칼(sword.png, 지금은 숨김): 16x16 DungeonTileset II — 0x72 (CC0)
 https://0x72.itch.io/dungeontileset-ii
+sk_bash·sk_stun·sk_whirl·sk_guard.png — PixelLab(구독, 상업 사용 가능) 2026-10-14 생성, 5차 스킬 아이콘

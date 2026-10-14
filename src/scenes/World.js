@@ -1,7 +1,7 @@
 // 게임 화면: 지도, 기사, 몬스터·보스, NPC, 전투, 자동 사냥. 숫자 계산은 모두 domain 모듈에 맡긴다.
 // 시간: 전투·무적·재생성·땅 아이템·보스 방 초기화는 게임 시계(this.gt, 멈추면 안 흐름), 보스 재등장만 실제 시각(Date.now).
 import bal from '../../data/balance.js';
-import { buildWorld, TILE, W, H, mapIdAt, regionName, inBossRoom, BOSS_ROOM, NPCS, TINTS, REGIONS } from '../../data/maps.js';
+import { buildWorld, TILE, W, H, mapIdAt, regionName, inBossRoom, BOSS_ROOMS, bossRoomOf, NPCS, TINTS, REGIONS } from '../../data/maps.js';
 import { makeRng } from '../domain/rng.js';
 import * as prog from '../domain/progression.js';
 import * as combat from '../domain/combat.js';
@@ -9,6 +9,8 @@ import * as rewards from '../domain/rewards.js';
 import * as inv from '../domain/inventory.js';
 import { bossRemainMs, bossReady, normalizeBossTime } from '../domain/boss.js';
 import { decideAuto } from '../domain/autohunt.js';
+import { findPath } from '../domain/path.js';
+import { learnedSkills, skillDef } from '../domain/skills.js';
 import { createJoystick } from '../ui/joystick.js';
 import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
@@ -27,19 +29,32 @@ const ACTIVE_MIN = 26 * TILE; // 기사에서 이보다 먼 몬스터는 쉰다(
 const BIG_SCREEN = 1100;      // 짧은 변이 이보다 크면(태블릿·PC) 기본 3배, 그 밖(폰·폴드)은 기본 2배
 const AUTO_RESUME_MS = 400;   // 자동 사냥 중 조이스틱에서 손을 떼고 다시 자동으로 움직이기까지
 const TALK_RANGE = 1.7 * TILE;
+const PATH_MS = 500;          // 5차: 길을 다시 구하는 간격(목표 칸이 바뀌면 바로)
+const UNREACH_MS = 20000;     // 5차: 길이 없는 몬스터는 이 시간 동안 자동 사냥에서 뺀다
+const ROAM_MS = 8000;         // 5차: 돌아다니기 목표 하나에 쓰는 최대 시간
+const NUDGE = 6;              // 5차: 조이스틱이 모서리에 걸리면 옆으로 이만큼(px) 안에 빈 곳을 찾아 미끄러진다
+const SKILL_IDS = ['bash', 'stun', 'whirl', 'guard'];
 const DIRS = ['down', 'up', 'left', 'right'];
 const MON_KEYS = {
   jelly: 'm_jelly', mouse: 'm_mouse', hopfrog: 'm_hopfrog', goblin: 'm_goblin',
   raccoon: 'm_raccoon', vine: 'm_vine', nightwing: 'm_nightwing',
   crab: 'm_crab', ember: 'm_ember', stalker: 'm_stalker', boss: 'm_boss',
+  wisp: 'm_wisp', skull: 'm_skull', warden: 'm_warden', eye: 'm_eye', lich: 'm_lich',
 };
+const MON_FRAME = { lich: 48 }; // 그림 한 칸 크기(없으면 16). 기사왕은 PixelLab 48×48 칸
+// 먼저 덤비는 몬스터. 4차 성터 몬스터는 공격이 세서(한 마리씩 싸우는 시뮬레이터 기준으로 맞춤) 먼저 덤비지 않고, 때리면 반격한다
 const AGGRESSIVE = new Set(['hopfrog', 'goblin', 'raccoon', 'vine', 'nightwing', 'crab', 'ember', 'stalker']);
-const ICON_IDS = ['woodSword', 'ironSword', 'steelSword', 'deepSword', 'clothArmor', 'leatherArmor', 'chainArmor', 'plateArmor', 'potion', 'returnScroll', 'weaponScroll', 'armorScroll'];
-const SWORD_TINT = { woodSword: 0xd09a62, ironSword: 0xffffff, steelSword: 0xc4ecff, deepSword: 0xc89cff };
-const BOSS_SCALE = 2;
+const ICON_IDS = ['woodSword', 'ironSword', 'steelSword', 'deepSword', 'mithrilSword', 'wraithSword', 'clothArmor', 'leatherArmor', 'chainArmor', 'plateArmor', 'mithrilArmor', 'wraithArmor', 'potion', 'returnScroll', 'weaponScroll', 'armorScroll'];
+const SWORD_TINT = { woodSword: 0xd09a62, ironSword: 0xffffff, steelSword: 0xc4ecff, deepSword: 0xc89cff, mithrilSword: 0xd8f4ff, wraithSword: 0xb08cff };
 const BOSS_REACH = 12; // 보스는 몸이 커서 공격이 조금 더 멀리서 닿는다
+// 보스별 모양·문구(id = 보스 몬스터 id = 보스 방 id)
+const BOSS_LOOK = {
+  boss: { scale: 2, origin: 0.8, tint: 0xffb0a0, label: '#ffb08a', wake: '폐광 깊은 곳에서 큰울림이 깨어났습니다', awake: '큰울림이 깨어 있다', killed: '큰울림을 쓰러뜨렸다!' },
+  lich: { scale: 1.1, origin: 0.83, tint: 0xffffff, label: '#c9a8ff', wake: '성터 깊은 곳에서 망령 기사왕이 깨어났습니다', awake: '기사왕이 깨어 있다', killed: '망령 기사왕을 쓰러뜨렸다!' },
+};
 
 const monDef = (id) => bal.monsters.find((m) => m.id === id);
+const DARK_REGIONS = new Set(['mine', 'ruin']); // 어두운 지역(기사 둘레만 밝음)
 const potionDef = bal.consumables.find((c) => c.id === 'potion');
 const countOf = (save, id) => save.bag.filter((i) => i.id === id).reduce((s, i) => s + (i.count ?? 1), 0);
 const itemByUid = (save, uid) => (uid ? save.bag.find((i) => i.uid === uid) || null : null);
@@ -62,12 +77,12 @@ export class WorldScene extends Phaser.Scene {
   constructor() { super('world'); }
 
   preload() {
-    this.load.image('tiles', 'assets/tiles.png');
+    this.load.image('tiles', 'assets/tiles_ex.png'); // 5차: 둘레 1px 늘린 그림(타일 틈 줄 방지, 도구/타일늘리기.py)
     this.load.spritesheet('hero', 'assets/hero.png', { frameWidth: HERO_FRAME, frameHeight: HERO_FRAME });
     this.load.image('sword', 'assets/sword.png');
     this.load.image('coin', 'assets/coin.png');
     this.load.spritesheet('fx_return', 'assets/fx_return.png', { frameWidth: 32, frameHeight: 32 });
-    for (const key of Object.values(MON_KEYS)) this.load.spritesheet(key, `assets/${key}.png`, { frameWidth: 16, frameHeight: 16 });
+    for (const [id, key] of Object.entries(MON_KEYS)) { const f = MON_FRAME[id] ?? 16; this.load.spritesheet(key, `assets/${key}.png`, { frameWidth: f, frameHeight: f }); }
     for (const n of NPCS) this.load.spritesheet(`npc_${n.id}`, `assets/npc_${n.id}.png`, { frameWidth: 16, frameHeight: 16 });
     for (const id of ICON_IDS) this.load.image(`ic_${id}`, `assets/icons/${id}.png`);
     this.load.spritesheet('fx_slash', 'assets/fx_slash.png', { frameWidth: 32, frameHeight: 32 });
@@ -110,9 +125,9 @@ export class WorldScene extends Phaser.Scene {
     this.groundItems = [];
     this.dropSeq = this.dropSeq ?? 0;
     this.autoItem = null;
-    this.boss = null;
-    this.bossAway = 0;
+    this.bosses = {}; // 보스 id → 보스 몬스터(방마다 하나). 방 밖에 있는 시간은 보스마다 b.away
     this.slam = null;
+    this.bossRoomIn = null; // 지금 들어가 있는 보스 방 id(들어갈 때 한 번만 알림)
     this.bossTick = 0;
     this.attackCd = 0;
     this.potionCd = 0;
@@ -123,6 +138,14 @@ export class WorldScene extends Phaser.Scene {
     this.autoCenter = null;
     this.autoTarget = null;
     this.stuck = { id: null, best: Infinity, sec: 0 };
+    // 5차: 스킬 다시 쓸 시각(게임 시계), 아머 끝 시각, 예약된 스킬, 자동 사냥 지역·길·돌아다니기·못 가는 몬스터
+    this.skillAt = {};
+    this.guardUntil = 0;
+    this.queuedSkill = null;
+    this.autoArea = null;
+    this.route = null;
+    this.roamGoal = null;
+    this.unreach = new Map();
     this.attackHeld = false;
     this.talkNpc = null;
     this.playing = false;
@@ -130,11 +153,17 @@ export class WorldScene extends Phaser.Scene {
 
     this.joy = createJoystick({
       zone: document.getElementById('game'),
-      onRelease: () => { this.autoResumeAt = this.gt + AUTO_RESUME_MS; this.autoCenter = { x: this.knight.x, y: this.knight.y }; },
+      onRelease: () => {
+        this.autoResumeAt = this.gt + AUTO_RESUME_MS; this.autoCenter = { x: this.knight.x, y: this.knight.y };
+        // 5차: 직접 옮긴 지역에서 다시 사냥(마을이면 그대로 두고 돌아가지 않음)
+        const area = mapIdAt(this.knight.x);
+        if (area !== 'town') this.autoArea = area;
+        this.route = null; this.roamGoal = null;
+      },
     });
     this.bindButtons();
     this.minimap = createMinimap({
-      root: document.getElementById('hud'), wmap: this.wmap, regions: REGIONS, npcs: NPCS, bossRoom: BOSS_ROOM, tile: TILE,
+      root: document.getElementById('hud'), wmap: this.wmap, regions: REGIONS, npcs: NPCS, bossRooms: BOSS_ROOMS, tile: TILE,
       onToggle: (open) => { this.prefs.mini = open; savePrefs(this.prefs); },
     });
     this.minimap.setOpen(this.prefs.mini);
@@ -146,7 +175,7 @@ export class WorldScene extends Phaser.Scene {
   // ---------- 지도 ----------
   buildMap() {
     const map = this.make.tilemap({ width: W, height: H, tileWidth: TILE, tileHeight: TILE });
-    const ts = map.addTilesetImage('tiles', 'tiles', TILE, TILE, 0, 0);
+    const ts = map.addTilesetImage('tiles', 'tiles', TILE, TILE, 1, 2);
     const ground = map.createBlankLayer('ground', ts).setDepth(0);
     const deco = map.createBlankLayer('deco', ts).setDepth(1);
     const over = map.createBlankLayer('over', ts).setDepth(1000);
@@ -162,9 +191,12 @@ export class WorldScene extends Phaser.Scene {
       this.add.text(l.x, l.y, l.text, { fontFamily: 'Batang, serif', fontSize: '9px', color: '#efe4c8', stroke: '#14161f', strokeThickness: 3, resolution: 4 })
         .setOrigin(0.5).setDepth(5);
     }
-    // 보스 방 표지판 글씨(1초마다 갱신)
-    this.bossSign = this.add.text((BOSS_ROOM.x0 - 4) * TILE + 8, 18 * TILE + 10, '', { fontFamily: 'system-ui, sans-serif', fontSize: '7px', color: '#ffd9a0', stroke: '#14161f', strokeThickness: 3, resolution: 4, align: 'center' })
-      .setOrigin(0.5).setDepth(6);
+    // 보스 방 표지판 글씨(방마다, 1초마다 갱신)
+    this.bossSigns = {};
+    for (const R of BOSS_ROOMS) {
+      this.bossSigns[R.id] = this.add.text((R.x0 - 4) * TILE + 8, 18 * TILE + 10, '', { fontFamily: 'system-ui, sans-serif', fontSize: '7px', color: '#ffd9a0', stroke: '#14161f', strokeThickness: 3, resolution: 4, align: 'center' })
+        .setOrigin(0.5).setDepth(6);
+    }
   }
 
   // 폐광: 기사 둘레만 밝은 어둠 그림(기사를 따라다님 — 좌표 변환 없음)
@@ -175,7 +207,7 @@ export class WorldScene extends Phaser.Scene {
     // 크기가 같으면 다시 만들지 않는다. 다시 만들면 진행 중인 페이드를 끊고 지금 지역에 맞는 밝기로 바로 맞춘다
     if (this.dark && this.darkSize === `${w}x${h}`) return;
     this.darkSize = `${w}x${h}`;
-    const alpha = this.region === 'mine' ? 1 : 0;
+    const alpha = DARK_REGIONS.has(this.region) ? 1 : 0;
     if (this.dark) { this.tweens.killTweensOf(this.dark); this.dark.destroy(); this.textures.remove('dark'); }
     const tex = this.textures.createCanvas('dark', w, h), c = tex.getContext();
     const g = c.createRadialGradient(w / 2, h / 2, 16, w / 2, h / 2, 118);
@@ -215,10 +247,11 @@ export class WorldScene extends Phaser.Scene {
     return moved;
   }
 
-  // 일반 몬스터는 보스 방에 못 들어가고, 보스는 방 밖으로 못 나간다
+  // 일반 몬스터는 어느 보스 방에도 못 들어가고, 보스는 자기 방 밖으로 못 나간다
   monsterBlocked(m, x, y) {
     if (this.blocked(x, y)) return true;
-    return m.def.isBoss ? !inBossRoom(x, y) : inBossRoom(x, y);
+    const room = inBossRoom(x, y);
+    return m.def.isBoss ? room?.id !== m.id : !!room;
   }
 
   fitZoom() {
@@ -290,6 +323,8 @@ export class WorldScene extends Phaser.Scene {
     this.releaseInput();
     this.setAuto(false);
     this.cancelSlam();
+    // 5차: 다른 기록으로 들어오면 앞 캐릭터의 쿨타임·아머·못 가는 목록을 물려받지 않게
+    this.skillAt = {}; this.guardUntil = 0; this.guardRing?.destroy(); this.guardRing = null; this.unreach.clear();
     this.invulnUntil = this.gt + 3000;
     this.clearMonsters();
     this.spawnAll();
@@ -297,12 +332,13 @@ export class WorldScene extends Phaser.Scene {
     this.playing = true;
     hud.log(isNew ? '바람 마을에 도착했습니다. 마을 사람들에게 다가가 [대화]를 눌러 보세요.' : `다시 오셨습니다. Lv ${p.level} 기사`);
     this.refreshHud(true);
+    this.refreshSkills(true);
   }
 
   leaveGame() { this.playing = false; this.setAuto(false); this.releaseInput(); }
 
   // 창이 열릴 때: 조이스틱과 눌린 공격 버튼을 놓는다
-  releaseInput() { this.joy?.reset(); this.attackHeld = false; }
+  releaseInput() { this.joy?.reset(); this.attackHeld = false; this.queuedSkill = null; }
 
   positionOf() { return { map: mapIdAt(this.knight.x), x: Math.round(this.knight.x), y: Math.round(this.knight.y) }; }
 
@@ -352,6 +388,8 @@ export class WorldScene extends Phaser.Scene {
       document.getElementById(id)?.addEventListener('click', () => this.setZoomPref(v));
     }
     on('btnReturn', () => this.useReturn('직접'));
+    // 5차 스킬 버튼
+    for (const id of SKILL_IDS) on(`btnSkill_${id}`, () => this.useSkill(id, null, true));
     on('btnAuto', () => {
       if (G.auto) { this.setAuto(false); return; }
       if (mapIdAt(this.knight.x) === 'town') { hud.toast('자동 사냥은 사냥터에서 켜 주세요'); return; }
@@ -365,14 +403,19 @@ export class WorldScene extends Phaser.Scene {
   setAuto(onOff) {
     G.auto = onOff;
     hud.setAuto(onOff);
-    if (onOff) { this.autoCenter = { x: this.knight.x, y: this.knight.y }; this.autoTarget = null; this.autoItem = null; this.autoResumeAt = 0; }
+    if (onOff) {
+      this.autoCenter = { x: this.knight.x, y: this.knight.y }; this.autoTarget = null; this.autoItem = null; this.autoResumeAt = 0;
+      this.autoArea = mapIdAt(this.knight.x); this.unreach.clear();
+    }
+    this.route = null; this.roamGoal = null;
   }
 
   // ---------- 몬스터 ----------
   clearMonsters() {
-    for (const m of this.monsters) { m.sprite.destroy(); m.bar.destroy(); m.label?.destroy(); }
+    for (const m of this.monsters) { m.sprite.destroy(); m.bar.destroy(); m.label?.destroy(); m.stunText?.destroy(); }
     this.monsters = [];
-    this.boss = null;
+    this.bosses = {};
+    this.cancelSlam();
     for (const g of this.groundItems) { this.tweens.killTweensOf(g.sprite); g.sprite.destroy(); }
     this.groundItems = [];
     this.autoItem = null;
@@ -383,7 +426,7 @@ export class WorldScene extends Phaser.Scene {
       const m = this.makeMonster(z.monsters[i % z.monsters.length], z);
       this.respawn(m, true);
     }
-    this.trySpawnBoss();
+    for (const R of BOSS_ROOMS) this.trySpawnBoss(R.id);
   }
 
   makeMonster(id, zone) {
@@ -409,33 +452,31 @@ export class WorldScene extends Phaser.Scene {
     m.respawnAt = this.gt + 2000; // 자리 못 찾으면 잠시 뒤 다시
   }
 
-  // 보스: 처음·재등장·다시 열기 모두 bossReady 하나로 판단(일반 재생성 없음)
-  trySpawnBoss() {
-    if (this.boss?.alive || !G.save) return;
-    if (!bossReady(G.save.boss.defeatedAt, Date.now(), bal)) return;
-    if (!this.boss) {
-      const def = monDef('boss');
-      const sprite = this.add.sprite(0, 0, MON_KEYS.boss, 0).setOrigin(0.5, 0.8).setScale(BOSS_SCALE);
+  // 보스: 처음·재등장·다시 열기 모두 bossReady 하나로 판단(일반 재생성 없음). id = 보스 몬스터 id = 방 id
+  trySpawnBoss(id) {
+    const R = bossRoomOf(id), def = monDef(id), look = BOSS_LOOK[id];
+    if (!R || !def?.isBoss || !look || this.bosses[id]?.alive || !G.save) return;
+    if (!bossReady(G.save.bosses[id], Date.now(), bal)) return;
+    if (!this.bosses[id]) {
+      const sprite = this.add.sprite(0, 0, MON_KEYS[id], 0).setOrigin(0.5, look.origin).setScale(look.scale);
       const bar = this.add.graphics().setDepth(900);
-      const label = this.add.text(0, 0, def.name, { fontFamily: 'Batang, serif', fontSize: '8px', fontStyle: 'bold', color: '#ffb08a', stroke: '#14161f', strokeThickness: 3, resolution: 4 }).setOrigin(0.5).setDepth(901);
-      this.boss = { uid: 'boss', id: 'boss', def, zone: null, sprite, bar, label, hp: def.hp, alive: false, cd: 0, aggro: false, dir: 'down', hurtAt: -1e9, reach: BOSS_REACH, attacks: 0 };
-      this.monsters.push(this.boss);
+      const label = this.add.text(0, 0, def.name, { fontFamily: 'Batang, serif', fontSize: '8px', fontStyle: 'bold', color: look.label, stroke: '#14161f', strokeThickness: 3, resolution: 4 }).setOrigin(0.5).setDepth(901);
+      this.bosses[id] = { uid: id, id, def, look, room: R, zone: null, sprite, bar, label, hp: def.hp, alive: false, cd: 0, aggro: false, dir: 'down', hurtAt: -1e9, reach: BOSS_REACH, attacks: 0, away: 0 };
+      this.monsters.push(this.bosses[id]);
     }
-    const b = this.boss;
-    const cx = ((BOSS_ROOM.x0 + BOSS_ROOM.x1) / 2 + 2) * TILE, cy = ((BOSS_ROOM.y0 + BOSS_ROOM.y1) / 2) * TILE;
-    b.sprite.setPosition(cx, cy).setVisible(true).setAlpha(1).setTint(0xffb0a0);
+    const b = this.bosses[id];
+    const cx = ((R.x0 + R.x1) / 2 + 2) * TILE, cy = ((R.y0 + R.y1) / 2) * TILE;
+    b.sprite.setPosition(cx, cy).setVisible(true).setAlpha(1).setTint(look.tint);
     b.label.setVisible(true);
-    b.sprite.play('boss_walk_down');
-    b.hp = b.def.hp; b.alive = true; b.aggro = false; b.cd = 0; b.attacks = 0;
-    this.bossAway = 0;
-    if (Math.abs(this.knight.x - cx) < 40 * TILE) hud.log('<b style="color:#ff9a7a">폐광 깊은 곳에서 큰울림이 깨어났습니다</b>');
+    b.sprite.play(`${id}_walk_down`);
+    b.hp = b.def.hp; b.alive = true; b.aggro = false; b.cd = 0; b.attacks = 0; b.away = 0;
+    if (Math.abs(this.knight.x - cx) < 40 * TILE) hud.log(`<b style="color:#ff9a7a">${look.wake}</b>`);
   }
 
-  resetBoss() {
-    const b = this.boss;
+  resetBoss(b) {
     if (!b?.alive) return;
     b.hp = b.def.hp; b.attacks = 0; b.aggro = false;
-    this.cancelSlam();
+    this.cancelSlam(b);
   }
 
   // ---------- 매 프레임 ----------
@@ -451,15 +492,23 @@ export class WorldScene extends Phaser.Scene {
     this.attackCd = Math.max(0, this.attackCd - dt);
     this.potionCd = Math.max(0, this.potionCd - dt);
 
+    // 5차: 공격 대기 중 눌러 둔 스킬은 자동 사냥보다 먼저 쓴다(자동 공격이 차례를 계속 가져가지 않게)
+    if (this.queuedSkill && this.attackCd <= 0) { const id = this.queuedSkill; this.queuedSkill = null; this.useSkill(id, null, true); }
     const v = this.joy.vector();
     let walking = false;
     if (v.active && (v.x || v.y)) {
-      walking = this.moveBy(this.knight, v.x * SPEED * dt, v.y * SPEED * dt);
+      walking = this.moveJoy(v.x * SPEED * dt, v.y * SPEED * dt);
       this.face = dirOf(v.x, v.y); this.dir8 = dir8Of(v.x, v.y);
     } else if (G.auto && !v.active && now >= this.autoResumeAt) {
       walking = this.runAuto(dt);
     }
-    if (G.auto && inBossRoom(this.knight.x, this.knight.y)) { this.setAuto(false); hud.toast('보스 방에서는 자동 사냥이 꺼집니다. 직접 싸워 주세요', 2600); }
+    const room = inBossRoom(this.knight.x, this.knight.y);
+    if (G.auto && room) { this.setAuto(false); hud.toast('보스 방에서는 자동 사냥이 꺼집니다. 직접 싸워 주세요', 2600); }
+    if ((room?.id ?? null) !== this.bossRoomIn) {
+      this.bossRoomIn = room?.id ?? null;
+      // 보상이 땅에 떨어질 만큼 가방·창고가 모두 찼으면 들어갈 때 미리 알린다(땅의 것은 60초 뒤 사라짐)
+      if (room && this.bagAndWarehouseFull()) hud.toast('가방과 창고가 모두 가득 찼습니다. 보스 보상이 땅에 떨어지면 60초 뒤 사라집니다', 3200);
+    }
     if (this.attackHeld) this.tryAttack();
     if (G.pending) return; // 보스 저장 실패 등: 같은 프레임에 다른 상태를 바꾸지 않는다
 
@@ -470,6 +519,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateMonsters(dt, now);
     if (G.pending) return;
     this.updateSlam(now);
+    this.updateSkillFx(now);
     this.updateGroundItems(now);
     this.updateTalk();
     this.updateRegion();
@@ -480,7 +530,8 @@ export class WorldScene extends Phaser.Scene {
       this.bossTick = 0;
       const fixed = normalizeBossTime(G.save, Date.now());
       if (fixed !== G.save) { G.save = fixed; G.persist('bossTime'); }
-      this.trySpawnBoss(); this.updateBossSign();
+      for (const R of BOSS_ROOMS) this.trySpawnBoss(R.id);
+      this.updateBossSign();
     }
 
     // 미니맵은 0.25초마다(접혀 있으면 그리지 않음)
@@ -494,6 +545,7 @@ export class WorldScene extends Phaser.Scene {
     this.autoSaveT += dt;
     if (this.autoSaveT >= 5) { this.autoSaveT = 0; G.persist('auto'); }
     this.refreshHud();
+    this.refreshSkills();
   }
 
   updateRegion() {
@@ -501,7 +553,7 @@ export class WorldScene extends Phaser.Scene {
     if (r !== this.region) {
       this.region = r;
       this.tweens.killTweensOf(this.dark);
-      this.tweens.add({ targets: this.dark, alpha: r === 'mine' ? 1 : 0, duration: 700 });
+      this.tweens.add({ targets: this.dark, alpha: DARK_REGIONS.has(r) ? 1 : 0, duration: 700 });
       if (r !== 'town') hud.toast(regionName(r), 1400);
     }
     this.dark.setPosition(this.snap(this.knight.x), this.snap(this.knight.y - 8));
@@ -517,8 +569,16 @@ export class WorldScene extends Phaser.Scene {
   }
 
   updateBossSign() {
-    const ms = bossRemainMs(G.save.boss.defeatedAt, Date.now(), bal);
-    this.bossSign.setText(this.boss?.alive ? '큰울림이 깨어 있다' : ms > 0 ? `다시 깨어나기까지\n${fmtRemain(ms)}` : '');
+    for (const R of BOSS_ROOMS) {
+      const ms = bossRemainMs(G.save.bosses[R.id], Date.now(), bal);
+      this.bossSigns[R.id].setText(this.bosses[R.id]?.alive ? BOSS_LOOK[R.id].awake : ms > 0 ? `다시 깨어나기까지\n${fmtRemain(ms)}` : '');
+    }
+  }
+
+  // 가방·창고 모두 빈칸이 없음(보스 보상이 땅으로 갈 수 있는 상태) — 들어갈 때 알림용 대략 판단
+  bagAndWarehouseFull() {
+    const s = G.save;
+    return s.bag.length >= bal.inventory.bagSlots && s.warehouse.length >= bal.inventory.warehouseSlots;
   }
 
   // ---------- 기사 행동 ----------
@@ -530,7 +590,7 @@ export class WorldScene extends Phaser.Scene {
   dist(m) { return Math.hypot(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y) - (m.reach || 0); }
 
   // 보스는 기사도 방 안에 있을 때만 때릴 수 있다(방 밖에서 일방적으로 치기 방지)
-  canHit(m) { return m.alive && (!m.def.isBoss || inBossRoom(this.knight.x, this.knight.y)); }
+  canHit(m) { return m.alive && (!m.def.isBoss || inBossRoom(this.knight.x, this.knight.y)?.id === m.id); }
 
   nearestMonster(range) {
     let best = null, bd = range;
@@ -547,17 +607,112 @@ export class WorldScene extends Phaser.Scene {
     const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
     if (!m) return false;
     this.attackCd = bal.knight.attackMs / 1000;
-    this.face = dirOf(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y);
     this.swingAt(m);
-    const r = combat.playerAttack(this.stats(), m.def, G.save.player.level, this.rng, bal);
+    this.strike(m);
+    return true;
+  }
+
+  // 한 번 때리기(일반 공격·스킬 공통). mult = 스킬 피해 배수. 결과 {hit, dmg}
+  // fixed: 회오리처럼 여러 마리를 칠 때 쓰는 순간의 능력치·레벨({stats, level})로 고정(중간 레벨업 영향 없음)
+  strike(m, mult = 1, color = '#ffffff', fixed = null) {
+    this.face = dirOf(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y);
+    const r = combat.playerAttack(fixed?.stats ?? this.stats(), m.def, fixed?.level ?? G.save.player.level, this.rng, bal, { mult });
     m.aggro = true;
-    if (!r.hit) { this.floatText(m.sprite.x, m.sprite.y - 14, 'MISS', '#c9c2b0'); return true; }
+    if (!r.hit) { this.floatText(m.sprite.x, m.sprite.y - 14, 'MISS', '#c9c2b0'); return r; }
     m.hp -= r.dmg;
     m.hurtAt = this.gt;
     if (!m.def.isBoss) this.knockback(m); else this.flashWhite(m);
-    this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(r.dmg), '#ffffff');
+    this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(r.dmg), color);
     if (m.hp <= 0) (m.def.isBoss ? this.killBoss(m) : this.killMonster(m));
+    return r;
+  }
+
+  // ---------- 5차 스킬 ----------
+  // 남은 쿨타임(ms, 0이면 준비됨)
+  skillLeft(id) { return Math.max(0, (this.skillAt[id] ?? 0) - this.gt); }
+
+  // manual: 버튼으로 눌렀을 때만 안내 문구. 공격 스킬은 일반 공격 한 번을 대신한다(공격 대기 중이면 버튼은 예약)
+  useSkill(id, target, manual) {
+    if (!this.canAct()) return false;
+    const def = skillDef(id, bal), lv = G.save.player.level;
+    if (lv < def.level) { if (manual) hud.toast(`${def.name}은(는) Lv ${def.level}에 배웁니다`); return false; }
+    if (this.skillLeft(id) > 0) { if (manual) hud.toast(`${def.name} 준비 중 (${Math.ceil(this.skillLeft(id) / 1000)}초)`); return false; }
+    if (id === 'guard') {
+      this.skillAt.guard = this.gt + def.cooldownMs;
+      this.guardUntil = this.gt + def.durationMs;
+      this.guardFx();
+      this.floatText(this.knight.x, this.knight.y - 24, def.name, '#9fd8ff', 1100);
+      this.refreshSkills(true);
+      return true;
+    }
+    if (this.attackCd > 0) { if (manual) this.queuedSkill = id; return false; }
+    if (id === 'whirl') {
+      const r = def.radiusTiles * TILE;
+      // 직접 누르면 둘레 모두, 자동 사냥은 이미 덤비는 몬스터(+지금 대상)만 — 가만히 있는 몬스터를 깨우지 않는다
+      const list = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (manual || m.aggro || m === target));
+      if (!list.length) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
+      this.skillAt.whirl = this.gt + def.cooldownMs;
+      this.attackCd = bal.knight.attackMs / 1000;
+      this.swingAt(list[0]);
+      this.whirlFx(r);
+      const fixed = { stats: this.stats(), level: G.save.player.level };
+      for (const m of list) if (this.canHit(m)) this.strike(m, def.mult, '#9ff0ff', fixed);
+      this.refreshSkills(true);
+      return true;
+    }
+    const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
+    if (!m) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
+    this.skillAt[id] = this.gt + def.cooldownMs;
+    this.attackCd = bal.knight.attackMs / 1000;
+    this.swingAt(m, id === 'bash' ? 0xffa040 : 0xffe060);
+    this.floatText(this.knight.x, this.knight.y - 24, def.name, id === 'bash' ? '#ffb070' : '#ffe680', 900);
+    const r = this.strike(m, def.mult, id === 'bash' ? '#ffb070' : '#ffe680');
+    // 쇼크 스턴: 맞으면 기절(보스는 피해만)
+    if (id === 'stun' && r.hit && m.alive && !m.def.isBoss) { m.stunUntil = this.gt + def.stunMs; this.stunFx(m); }
+    this.refreshSkills(true);
     return true;
+  }
+
+  guardFx() {
+    this.guardRing?.destroy();
+    this.guardRing = this.add.graphics().setDepth(11);
+  }
+
+  whirlFx(r) {
+    const x = this.knight.x, y = this.knight.y;
+    const g = this.add.graphics().setDepth(949);
+    const o = { k: 0 };
+    this.tweens.add({ targets: o, k: 1, duration: 320, ease: 'Cubic.easeOut',
+      onUpdate: () => { g.clear(); g.lineStyle(3, 0x9ff0ff, 0.9 * (1 - o.k)).strokeCircle(x, y - 4, r * (0.4 + 0.6 * o.k)); g.lineStyle(1, 0xffffff, 0.8 * (1 - o.k)).strokeCircle(x, y - 4, r * (0.3 + 0.6 * o.k)); },
+      onComplete: () => g.destroy() });
+  }
+
+  stunFx(m) {
+    const t = this.add.text(m.sprite.x, m.sprite.y - 20, '★기절', { fontFamily: 'system-ui, sans-serif', fontSize: '7px', fontStyle: 'bold', color: '#ffe680', stroke: '#000', strokeThickness: 2, resolution: 4 }).setOrigin(0.5).setDepth(981);
+    m.stunText?.destroy(); m.stunText = t;
+  }
+
+  // 매 프레임: 아머 테두리·기절 글자 따라 붙이기
+  updateSkillFx(now) {
+    if (this.guardRing) {
+      if (now >= this.guardUntil) { this.guardRing.destroy(); this.guardRing = null; }
+      else {
+        const left = this.guardUntil - now, blink = left < 3000 && Math.floor(now / 150) % 2;
+        this.guardRing.clear().lineStyle(1, 0x7fc8ff, blink ? 0.3 : 0.85).strokeEllipse(this.snap(this.knight.x), this.snap(this.knight.y - 1), 22, 9)
+          .lineStyle(1, 0xcfeaff, blink ? 0.15 : 0.5).strokeEllipse(this.snap(this.knight.x), this.snap(this.knight.y - 12), 26, 30);
+      }
+    }
+  }
+
+  refreshSkills(force) {
+    const now = performance.now();
+    if (!force && now - (this.skillHudAt || 0) < 100) return;
+    this.skillHudAt = now;
+    const lv = G.save.player.level;
+    hud.setSkills(SKILL_IDS.map((id) => {
+      const d = skillDef(id, bal);
+      return { id, name: d.name, level: d.level, learned: lv >= d.level, left: this.skillLeft(id), total: d.cooldownMs, active: id === 'guard' && this.gt < this.guardUntil };
+    }));
   }
 
   killMonster(m) {
@@ -565,6 +720,7 @@ export class WorldScene extends Phaser.Scene {
     m.alive = false;
     m.respawnAt = this.gt + RESPAWN_MS;
     m.sprite.setVisible(false); m.bar.clear();
+    m.stunText?.destroy(); m.stunText = null; m.stunUntil = 0;
     this.smoke(m.sprite.x, m.sprite.y - 4, 0.6);
 
     const s = G.save;
@@ -586,19 +742,20 @@ export class WorldScene extends Phaser.Scene {
   // 보스: 보상 전부 + 처치 시각을 한 후보로 만들어 한 번에 저장(성공해야 확정)
   killBoss(b) {
     b.alive = false;
-    this.cancelSlam();
+    this.cancelSlam(b);
     b.sprite.setVisible(false); b.bar.clear(); b.label.setVisible(false);
     const x = b.sprite.x, y = b.sprite.y;
     const s = G.save;
-    const rw = rewards.rollRewards('boss', s.player.level, ratesOf(s), this.rng, bal);
-    const res = inv.bossKill(s, rw, Date.now(), bal);
+    // 처치한 보스의 id 하나로 보상 추첨·저장·후처리를 모두 한다
+    const rw = rewards.rollRewards(b.id, s.player.level, ratesOf(s), this.rng, bal);
+    const res = inv.bossKill(s, b.id, rw, Date.now(), bal);
     if (!res.ok) { hud.toast(res.reason); b.alive = true; b.hp = 1; b.sprite.setVisible(true); b.label.setVisible(true); return; }
     const done = G.commit(res.save, 'boss', {
       mustSave: true,
       after: () => {
         for (let i = 0; i < 3; i++) this.time.delayedCall(i * 140, () => this.smoke(x + (Math.random() - 0.5) * 20, y - 8 - Math.random() * 12, 1));
         this.cameras.main.shake(400, 0.006);
-        this.floatText(x, y - 34, '큰울림을 쓰러뜨렸다!', '#ffd36a', 2200);
+        this.floatText(x, y - 34, b.look.killed, '#ffd36a', 2200);
         const list = (arr) => arr.map((d) => `${nameOf(d.id)}${d.count > 1 ? ` ${d.count}개` : ''}`).join(', ');
         hud.log(`<b style="color:#ffd36a">${b.def.name} 처치!</b> 경험치 +${rw.exp.toLocaleString('ko-KR')} · 돈 +${rw.gold.toLocaleString('ko-KR')}${res.toBag.length ? ` · ${list(res.toBag)}` : ''}`);
         if (res.toWarehouse.length) hud.log(`<span style="color:#9fd8ff">가방이 가득해 ${josa(list(res.toWarehouse), '은/는')} 창고지기에게 맡겨 두었습니다</span>`);
@@ -725,6 +882,7 @@ export class WorldScene extends Phaser.Scene {
 
   teleportTown(effect = true) {
     this.setAuto(false);
+    this.queuedSkill = null;
     this.cancelSwing();
     this.cancelSlam();
     if (effect) this.returnBurst(this.knight.x, this.knight.y, false);
@@ -743,6 +901,8 @@ export class WorldScene extends Phaser.Scene {
     const st = this.stats(), p = G.save.player;
     if (p.hp < st.maxHp) p.hp = Math.min(st.maxHp, p.hp + bal.knight.regenBase + Math.floor(p.level / bal.knight.regenDivisor));
   }
+
+  guardReduce(now) { return now < this.guardUntil ? skillDef('guard', bal).reduce : 0; }
 
   hurtPlayer(dmg, color = '#ff6b5e') {
     const p = G.save.player;
@@ -784,14 +944,22 @@ export class WorldScene extends Phaser.Scene {
       potionReady: this.potionCd <= 0,
       attackReady: this.attackCd <= 0,
       attackRange: ATTACK_RANGE,
-      monsters: this.monsters.map((m) => ({ id: m.uid, x: m.sprite.x, y: m.sprite.y, alive: m.alive, isBoss: !!m.def.isBoss })),
+      monsters: this.monsters.map((m) => ({ id: m.uid, x: m.sprite.x, y: m.sprite.y, alive: m.alive, isBoss: !!m.def.isBoss, area: mapIdAt(m.sprite.x), hpRatio: Math.max(0, m.hp / m.def.hp) })),
       targetId: this.autoTarget,
+      // 5차: 같은 지역에서 찾아가기·스킬
+      huntArea: this.autoArea ?? mapIdAt(this.knight.x),
+      skipIds: [...this.unreach].filter(([, until]) => until > this.gt).map(([id]) => id),
+      skills: learnedSkills(s.player.level, bal).map((id) => ({ id, ready: this.skillLeft(id) <= 0 })),
+      // 회오리·아머 판단용: 이미 나에게 덤비는(aggro) 몬스터만 센다 — 가만히 있는 몬스터(성터 등)를 회오리로 끌어들이지 않게
+      nearCount: this.monsters.filter((m) => m.aggro && this.canHit(m) && this.dist(m) <= skillDef('whirl', bal).radiusTiles * TILE).length,
       stuckSec: this.stuck.id === this.autoTarget ? this.stuck.sec : 0,
-      items: this.groundItems.filter((g) => g.skipUntil <= this.gt && this.canAccept(g)).map((g) => ({ id: g.uid, x: g.x, y: g.y })),
+      items: this.groundItems.filter((g) => g.skipUntil <= this.gt && this.canAccept(g) && mapIdAt(g.x) === (this.autoArea ?? mapIdAt(this.knight.x)) && !inBossRoom(g.x, g.y))
+        .map((g) => ({ id: g.uid, x: g.x, y: g.y })),
       itemId: this.autoItem,
     };
     const a = decideAuto(ctx, bal);
     const tgt = a.targetId ? this.monsters.find((m) => m.uid === a.targetId) : null;
+    if (a.action !== 'roam') this.roamGoal = null;
     this.autoTarget = a.targetId ?? (a.action === 'move' && a.x !== undefined ? null : this.autoTarget);
     this.autoItem = a.itemId ?? null;
     if (a.itemId) {
@@ -799,11 +967,14 @@ export class WorldScene extends Phaser.Scene {
       const g = this.groundItems.find((it) => it.uid === a.itemId);
       if (!g) return false;
       const d = Math.hypot(g.x - this.knight.x, g.y - this.knight.y);
-      if (this.itemStuck?.id !== g.uid) this.itemStuck = { id: g.uid, best: d, sec: 0 };
+      if (this.itemStuck?.id !== g.uid) this.itemStuck = { id: g.uid, best: d, sec: 0, kx: this.knight.x, ky: this.knight.y };
       else if (d < this.itemStuck.best - 1) { this.itemStuck.best = d; this.itemStuck.sec = 0; }
+      else if (this.route && Math.hypot(this.knight.x - this.itemStuck.kx, this.knight.y - this.itemStuck.ky) > 4) { this.itemStuck.sec = 0; this.itemStuck.kx = this.knight.x; this.itemStuck.ky = this.knight.y; }
       else this.itemStuck.sec += dt;
       if (this.itemStuck.sec >= bal.autohunt.stuckSec) { g.skipUntil = this.gt + ITEM_SKIP_MS; this.autoItem = null; this.itemStuck = null; return false; }
-      return this.walkTo(g.x, g.y, dt, 2);
+      const w = this.walkTo(g.x, g.y, dt, 2);
+      if (w === null) { g.skipUntil = this.gt + ITEM_SKIP_MS; this.autoItem = null; this.itemStuck = null; return false; }
+      return w;
     }
 
     switch (a.action) {
@@ -811,13 +982,28 @@ export class WorldScene extends Phaser.Scene {
       case 'return': if (!this.useReturn(`자동 사냥(${a.reason})`)) this.stopAuto(a.reason); return false;
       case 'stop': this.stopAuto(a.reason); return false;
       case 'attack':
-        if (tgt) { this.trackStuck(tgt, dt); if (!this.tryAttack(tgt)) return this.walkTo(tgt.sprite.x, tgt.sprite.y, dt, ATTACK_RANGE - 4); }
+        if (tgt) {
+          this.autoCenter = { x: this.knight.x, y: this.knight.y };
+          if (this.tryAttack(tgt)) { this.stuck = { id: tgt.uid, best: Infinity, sec: 0 }; return false; } // 때렸으면 막힘이 아님
+          this.trackStuck(tgt, dt);
+          return this.chase(tgt, dt);
+        }
         return false;
+      case 'skill':
+        // 아머는 공격과 따로, 공격 스킬은 일반 공격 한 번을 대신(못 쓰면 일반 공격)
+        if (tgt) {
+          this.autoCenter = { x: this.knight.x, y: this.knight.y };
+          const used = this.useSkill(a.skillId, tgt, false) || (a.skillId !== 'guard' && this.tryAttack(tgt));
+          if (used) { if (a.skillId !== 'guard') this.stuck = { id: tgt.uid, best: Infinity, sec: 0 }; return false; }
+          if (a.skillId !== 'guard') { this.trackStuck(tgt, dt); return this.chase(tgt, dt); }
+        }
+        return false;
+      case 'roam': return this.roam(dt);
       case 'move': {
         const x = tgt ? tgt.sprite.x : a.x, y = tgt ? tgt.sprite.y : a.y;
-        if (tgt) this.trackStuck(tgt, dt);
+        if (tgt) { this.trackStuck(tgt, dt); return this.chase(tgt, dt); }
         if (x === undefined) return false;
-        return this.walkTo(x, y, dt, tgt ? ATTACK_RANGE - 4 : 2);
+        return this.walkTo(x, y, dt, 2) ?? false;
       }
       default: return false;
     }
@@ -831,22 +1017,120 @@ export class WorldScene extends Phaser.Scene {
 
   trackStuck(m, dt) {
     const d = Math.hypot(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y);
-    if (this.stuck.id !== m.uid) this.stuck = { id: m.uid, best: d, sec: 0 };
+    // 5차: 길을 따라 돌아가는 동안에는 거리가 잠시 늘 수 있다 → 길이 있고 기준점에서 4px 넘게 움직였으면 진전(프레임률과 무관한 누적 이동)
+    if (this.stuck.id !== m.uid) this.stuck = { id: m.uid, best: d, sec: 0, kx: this.knight.x, ky: this.knight.y };
     else if (d < this.stuck.best - 1) { this.stuck.best = d; this.stuck.sec = 0; }
+    else if (this.route && Math.hypot(this.knight.x - this.stuck.kx, this.knight.y - this.stuck.ky) > 4) { this.stuck.sec = 0; this.stuck.kx = this.knight.x; this.stuck.ky = this.knight.y; }
     else this.stuck.sec += dt;
+    // 5차(⑤ #7): 막힌 대상은 uid별로 잠시 뺀다(둘 이상을 번갈아 쫓지 않게)
+    if (this.stuck.sec >= bal.autohunt.stuckSec) { this.unreach.set(m.uid, this.gt + UNREACH_MS); this.stuck = { id: null, best: Infinity, sec: 0 }; this.autoTarget = null; this.route = null; }
   }
 
+  // 몬스터 쫓기: 길이 없으면 잠시 자동 사냥에서 뺀다
+  chase(m, dt) {
+    const w = this.walkTo(m.sprite.x, m.sprite.y, dt, ATTACK_RANGE - 4);
+    if (w === null) { this.unreach.set(m.uid, this.gt + UNREACH_MS); this.autoTarget = null; return false; }
+    return w;
+  }
+
+  // 5차 돌아다니기: 지금 지역 사냥 구역 안 빈 칸 하나로 걸어가고, 닿거나 8초 지나면 다시 판단
+  roam(dt) {
+    const area = this.autoArea ?? mapIdAt(this.knight.x);
+    if (this.gt < (this.roamWait ?? 0)) return false; // 길 없음·막힘 뒤 잠시 쉬고 다시(A* 연속 실행 방지)
+    if (!this.roamGoal || this.gt >= this.roamGoal.until) {
+      const zones = this.wmap.zones.filter((z) => z.mapId === area);
+      if (!zones.length) return false;
+      this.roamGoal = null;
+      for (let i = 0; i < 30 && !this.roamGoal; i++) {
+        const z = zones[Math.floor(Math.random() * zones.length)];
+        const tx = z.x0 + Math.floor(Math.random() * (z.x1 - z.x0)), ty = z.y0 + Math.floor(Math.random() * (z.y1 - z.y0));
+        if (!this.autoTileBlocked(tx, ty, area)) this.roamGoal = { x: tx * TILE + 8, y: ty * TILE + 8, until: this.gt + ROAM_MS };
+      }
+      if (!this.roamGoal) return false;
+    }
+    const w = this.walkTo(this.roamGoal.x, this.roamGoal.y, dt, 4);
+    if (w === null) { this.roamGoal = null; this.roamWait = this.gt + PATH_MS; return false; } // 길 없음 → 0.5초 뒤 새 목표
+    if (w === false) {
+      // 닿았으면 바로 다음 목표, 못 움직였으면(몸이 걸림) 0.5초 쉬고 새 목표
+      const arrived = Math.hypot(this.roamGoal.x - this.knight.x, this.roamGoal.y - this.knight.y) <= 4;
+      this.roamGoal = null;
+      if (!arrived) this.roamWait = this.gt + PATH_MS;
+    }
+    return !!w;
+  }
+
+  // 자동 이동이 지나갈 수 없는 칸: 막힌 칸, 보스 방, 자동 사냥 지역 밖
+  autoTileBlocked(tx, ty, area) {
+    if (tx < 0 || ty < 0 || tx >= W || ty >= H || this.wmap.solid[ty][tx]) return true;
+    const cx = tx * TILE + 8, cy = ty * TILE + 8;
+    return !!inBossRoom(cx, cy) || (area && mapIdAt(cx) !== area);
+  }
+
+  // 일직선이 뚫려 있는지(4px 간격으로 몸 크기 검사, 보스 방·다른 지역 금지)
+  lineClear(x1, y1, area) {
+    const x0 = this.knight.x, y0 = this.knight.y, d = Math.hypot(x1 - x0, y1 - y0), n = Math.ceil(d / 4);
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n, y = y0 + ((y1 - y0) * i) / n;
+      if (this.blocked(x, y) || inBossRoom(x, y) || (area && mapIdAt(x) !== area)) return false;
+    }
+    return true;
+  }
+
+  // 목표까지 걷기. 돌아오는 값: 움직였으면 true, 이미 닿았으면 false, 길이 없으면 null.
+  // 일직선이 뚫려 있으면 곧장, 아니면 타일 길찾기(0.5초마다 또는 목표 칸이 바뀌면 다시 구함)
   walkTo(x, y, dt, stopDist) {
-    const dx = x - this.knight.x, dy = y - this.knight.y, d = Math.hypot(dx, dy);
-    if (d <= stopDist) return false;
-    this.face = dirOf(dx, dy); this.dir8 = dir8Of(dx, dy);
-    return this.moveBy(this.knight, (dx / d) * SPEED * dt, (dy / d) * SPEED * dt);
+    const dx0 = x - this.knight.x, dy0 = y - this.knight.y, d0 = Math.hypot(dx0, dy0);
+    if (d0 <= stopDist) { this.route = null; return false; }
+    const area = G.auto ? (this.autoArea ?? mapIdAt(this.knight.x)) : null;
+    let tx = x, ty = y;
+    if (!this.lineClear(x, y, area)) {
+      const gx = Math.floor(x / TILE), gy = Math.floor(y / TILE);
+      const r = this.route;
+      if (!r || r.gx !== gx || r.gy !== gy || this.gt >= r.at + PATH_MS) {
+        const sx = Math.floor(this.knight.x / TILE), sy = Math.floor(this.knight.y / TILE);
+        const blocked = (cx, cy) => (cx === sx && cy === sy ? false : this.autoTileBlocked(cx, cy, area));
+        const cells = findPath(blocked, sx, sy, gx, gy, { maxNodes: 4000 });
+        if (!cells) { this.route = null; return null; }
+        this.route = { gx, gy, at: this.gt, cells };
+      }
+      // 다음 칸 중심에 거의 닿았으면 그다음 칸으로(마지막 칸은 실제 목표 좌표로)
+      const cells = this.route.cells;
+      while (cells.length > 1 && Math.hypot(cells[0].x * TILE + 8 - this.knight.x, cells[0].y * TILE + 8 - this.knight.y) < 3) cells.shift();
+      if (cells.length && (cells.length > 1 || !this.lineClear(x, y, area))) { tx = cells[0].x * TILE + 8; ty = cells[0].y * TILE + 8; }
+    } else this.route = null;
+    const dx = tx - this.knight.x, dy = ty - this.knight.y, d = Math.hypot(dx, dy) || 1;
+    this.face = dirOf(dx0, dy0); this.dir8 = dir8Of(dx, dy);
+    const step = Math.min(d, SPEED * dt);
+    return this.moveBy(this.knight, (dx / d) * step, (dy / d) * step);
+  }
+
+  // 조이스틱: 정면이 막히면 옆 NUDGE px 안의 빈 곳 쪽으로 미끄러진다(모서리에 걸려 서지 않게)
+  moveJoy(mx, my) {
+    const k = this.knight, bx = k.x, by = k.y;
+    const moved = this.moveBy(k, mx, my);
+    const len = Math.hypot(mx, my);
+    if (!len) return moved;
+    // 주로 가려는 축으로 거의 못 갔으면 옆으로 비켜 보기
+    const horiz = Math.abs(mx) >= Math.abs(my);
+    const progress = horiz ? Math.abs(k.x - bx) : Math.abs(k.y - by);
+    if (progress >= len * 0.5) return moved;
+    const fx = horiz ? Math.sign(mx) * len : 0, fy = horiz ? 0 : Math.sign(my) * len;
+    for (let o = 1; o <= NUDGE; o++) for (const sgn of [1, -1]) {
+      const ox = horiz ? 0 : sgn * o, oy = horiz ? sgn * o : 0;
+      if (!this.blocked(bx + ox, by + oy) && !this.blocked(bx + ox + fx, by + oy + fy)) {
+        const slide = Math.min(len, o);
+        this.moveBy(k, horiz ? 0 : sgn * slide, horiz ? sgn * slide : 0);
+        return true;
+      }
+    }
+    return moved;
   }
 
   // ---------- 몬스터 움직임 ----------
   updateMonsters(dt, now) {
     const inTown = mapIdAt(this.knight.x) === 'town';
-    const playerInRoom = inBossRoom(this.knight.x, this.knight.y);
+    const playerRoom = inBossRoom(this.knight.x, this.knight.y); // 기사가 있는 보스 방(없으면 null)
+    const playerInRoom = !!playerRoom;
     const st = this.stats();
     for (const m of this.monsters) {
       if (!m.alive) { if (!m.def.isBoss && now >= m.respawnAt) this.respawn(m); continue; }
@@ -857,15 +1141,24 @@ export class WorldScene extends Phaser.Scene {
       }
       if (m.asleep) { m.asleep = false; m.sprite.setVisible(true); m.sprite.anims.resume(); }
       m.cd = Math.max(0, m.cd - dt);
+      if (m.stunText) {
+        if (now >= (m.stunUntil ?? 0)) { m.stunText.destroy(); m.stunText = null; }
+        else {
+          m.stunText.setPosition(m.sprite.x, m.sprite.y - 20);
+          m.sprite.anims.stop(); m.sprite.setTint(0x9a9aa8);
+          this.drawBar(m);
+          continue;
+        }
+      }
       const test = (x, y) => this.monsterBlocked(m, x, y);
       let moving = false;
       if (m.def.isBoss) {
-        // 보스: 기사가 방 안에 있을 때만 싸운다. 방 밖에 30초(게임 시계) 있으면 체력·공격 횟수 초기화
-        if (playerInRoom) { this.bossAway = 0; m.aggro = true; }
+        // 보스: 기사가 그 보스의 방 안에 있을 때만 싸운다. 방 밖에 30초(게임 시계) 있으면 체력·공격 횟수 초기화
+        if (playerRoom?.id === m.id) { m.away = 0; m.aggro = true; }
         else {
           m.aggro = false;
-          this.bossAway += dt * 1000;
-          if (this.bossAway >= bal.boss.roomResetMs && (m.hp < m.def.hp || m.attacks)) this.resetBoss();
+          m.away += dt * 1000;
+          if (m.away >= bal.boss.roomResetMs && (m.hp < m.def.hp || m.attacks)) this.resetBoss(m);
         }
       } else {
         if (!m.aggro && AGGRESSIVE.has(m.id) && d < AGGRO && !inTown && !playerInRoom) m.aggro = true;
@@ -875,12 +1168,12 @@ export class WorldScene extends Phaser.Scene {
       if (m.aggro) {
         const sp = m.def.isBoss ? MON_SPEED : MON_SPEED * 1.4;
         if (d > range) { moving = this.moveBy(m.sprite, (dx / d) * sp * dt, (dy / d) * sp * dt, test); m.dir = dirOf(dx, dy); }
-        else if (m.cd <= 0 && !(m.def.isBoss && this.slam)) {
+        else if (m.cd <= 0 && !(m.def.isBoss && this.slam?.b === m)) {
           m.cd = bal.combat.monsterAttackMs / 1000;
           m.dir = dirOf(dx, dy);
           if (m.def.isBoss && ++m.attacks % bal.boss.slamEvery === 0) { this.startSlam(m); m.cd += bal.boss.slamWarnMs / 1000; }
           else if (now >= this.invulnUntil) {
-            const r = combat.monsterAttack(m.def, st, G.save.player.level, this.rng, bal);
+            const r = combat.monsterAttack(m.def, st, G.save.player.level, this.rng, bal, { reduce: this.guardReduce(now) });
             if (r.hit) this.hurtPlayer(r.dmg); else this.floatText(this.knight.x, this.knight.y - 16, 'MISS', '#c9c2b0');
             if (!G.save || G.save.player.hp <= 0) return;
           }
@@ -903,7 +1196,7 @@ export class WorldScene extends Phaser.Scene {
       if (moving) m.sprite.play(`${m.id}_walk_${m.dir}`, true);
       else { m.sprite.anims.stop(); m.sprite.setFrame(DIRS.indexOf(m.dir)); }
       m.sprite.setDepth(10 + m.sprite.y / 1000);
-      if (now - m.hurtAt >= 100) m.sprite.setTint(m.def.isBoss ? 0xffb0a0 : 0xffffff);
+      if (now - m.hurtAt >= 100) m.sprite.setTint(m.def.isBoss ? m.look.tint : 0xffffff);
       else m.sprite.setTint(0xffaaaa);
       this.drawBar(m);
     }
@@ -946,11 +1239,15 @@ export class WorldScene extends Phaser.Scene {
     this.smoke(s.x, s.y - 4, 1.2);
     if (Math.hypot(this.knight.x - s.x, this.knight.y - s.y) > s.r) { this.floatText(this.knight.x, this.knight.y - 18, '피했다!', '#9fe08a'); return; }
     if (now < this.invulnUntil) return;
-    const base = combat.monsterAttack(s.b.def, this.stats(), G.save.player.level, () => 0, bal).dmg;
+    const base = combat.monsterAttack(s.b.def, this.stats(), G.save.player.level, () => 0, bal, { reduce: this.guardReduce(now) }).dmg;
     this.hurtPlayer(Math.max(1, Math.floor(base * bal.boss.slamMult)), '#ff3b2f');
   }
 
-  cancelSlam() { if (this.slam) { this.slam.g.destroy(); this.slam = null; } }
+  // owner를 주면 그 보스의 울림만 취소(다른 보스의 초기화·처치가 진행 중인 울림을 지우지 않게)
+  cancelSlam(owner) {
+    if (!this.slam || (owner && this.slam.b !== owner)) return;
+    this.slam.g.destroy(); this.slam = null;
+  }
 
   // ---------- 기사 그림·칼질·효과 ----------
   drawHero() {
@@ -962,7 +1259,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameraTarget.setPosition(this.snap(k.x), this.snap(k.y - 8));
   }
 
-  swingAt(m) {
+  swingAt(m, fxTint) {
     const dx = m.sprite.x - this.knight.x, dy = m.sprite.y - this.knight.y, d = Math.hypot(dx, dy) || 1;
     if (Math.abs(dx) > 1) this.facingLeft = dx < 0;
     // 칼: 대상 쪽(8방향)을 보고 기사 그림의 베기 동작을 한 번
@@ -979,7 +1276,8 @@ export class WorldScene extends Phaser.Scene {
     this.lunge.x = 0; this.lunge.y = 0;
     this.tweens.add({ targets: this.lunge, x: (dx / d) * 3, y: (dy / d) * 2, duration: 70, yoyo: true, ease: 'Quad.easeOut' });
     // 베기 효과: 대상 위에 크게
-    const fx = this.add.sprite(m.sprite.x, m.sprite.y - (m.def.isBoss ? 14 : 6), 'fx_slash').setDepth(950).setFlipX(this.facingLeft).setScale(m.def.isBoss ? 1.5 : 1);
+    const fx = this.add.sprite(m.sprite.x, m.sprite.y - (m.def.isBoss ? 14 : 6), 'fx_slash').setDepth(950).setFlipX(this.facingLeft).setScale((m.def.isBoss ? 1.5 : 1) * (fxTint ? 1.5 : 1));
+    if (fxTint) fx.setTint(fxTint);
     fx.play('fx_slash'); fx.once('animationcomplete', () => fx.destroy());
   }
 
@@ -1002,7 +1300,7 @@ export class WorldScene extends Phaser.Scene {
 
   flashWhite(m) {
     m.sprite.setTintFill(0xffffff);
-    this.time.delayedCall(70, () => { m.sprite.clearTint(); if (m.def.isBoss) m.sprite.setTint(0xffb0a0); });
+    this.time.delayedCall(70, () => { m.sprite.clearTint(); if (m.def.isBoss) m.sprite.setTint(m.look.tint); });
   }
 
   returnBurst(x, y, arrive) {
@@ -1035,7 +1333,7 @@ export class WorldScene extends Phaser.Scene {
     hud.update({
       level: lv, hp: s.player.hp, maxHp: st.maxHp, expPct: maxLevel ? 100 : (100 * s.player.exp) / need, maxLevel,
       gold: s.player.gold, potions: countOf(s, 'potion'), scrolls: countOf(s, 'returnScroll'),
-      place: inBossRoom(this.knight.x, this.knight.y) ? '큰울림의 방' : regionName(mapIdAt(this.knight.x)),
+      place: inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x)),
     });
   }
 }

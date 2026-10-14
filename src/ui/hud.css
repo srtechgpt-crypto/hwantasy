@@ -40,14 +40,25 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .log div.old { opacity: .55; }
 .toast { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--gold); border-radius: 6px; padding: 8px 16px; font-size: 14px; pointer-events: none; text-align: center; max-width: 80vw; }
 
-.pad { position: fixed; right: calc(env(safe-area-inset-right, 0px) + 16px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); display: grid; grid-template-columns: repeat(3, auto); grid-template-rows: auto auto; gap: 10px; align-items: end; }
+.pad { position: fixed; right: calc(env(safe-area-inset-right, 0px) + 16px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); display: grid; grid-template-columns: repeat(3, auto); grid-template-rows: auto auto auto; gap: 10px; align-items: end; }
 .round { width: 60px; height: 60px; border-radius: 50%; background: var(--panel); border: 2px solid var(--line); font-size: 14px; font-weight: 700; line-height: 1.1; display: grid; place-items: center; align-content: center; padding: 0; }
 .round small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
 .round:active { transform: scale(.93); }
-.round.big { grid-column: 3; grid-row: 1 / span 2; width: 96px; height: 96px; font-size: 19px; border-color: var(--gold); }
-#btnReturn { grid-column: 1; grid-row: 2; }
-#btnPotion { grid-column: 2; grid-row: 2; }
-#btnAuto { grid-column: 2; grid-row: 1; }
+.round.big { grid-column: 3; grid-row: 2 / span 2; width: 96px; height: 96px; font-size: 19px; border-color: var(--gold); }
+#btnReturn { grid-column: 1; grid-row: 3; }
+#btnPotion { grid-column: 2; grid-row: 3; }
+#btnAuto { grid-column: 2; grid-row: 2; }
+/* 5차 스킬: 공격 버튼 위 한 줄 */
+.skills { grid-column: 1 / span 3; grid-row: 1; display: flex; gap: 8px; justify-content: flex-end; }
+.skill { position: relative; width: 50px; height: 50px; border-radius: 50%; background: var(--panel); border: 2px solid #8a6a3a; padding: 0; overflow: hidden; display: grid; place-items: center; }
+.skill img { width: 32px; height: 32px; image-rendering: pixelated; margin-top: -6px; }
+.skill b { position: absolute; bottom: 3px; left: 0; right: 0; font-size: 10px; font-weight: 700; text-align: center; text-shadow: 0 1px 2px #000; }
+.skill small { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px #000, 0 0 2px #000; font-variant-numeric: tabular-nums; z-index: 2; }
+.skill::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(8,8,14,.72) calc(var(--cd, 0) * 360deg), transparent 0); z-index: 1; pointer-events: none; }
+.skill.locked { filter: grayscale(1) brightness(.55); border-color: var(--line); }
+.skill.locked small { font-size: 12px; }
+.skill.active { border-color: #7fc8ff; box-shadow: 0 0 12px rgba(127,200,255,.7); }
+.skill:active:not(.locked) { transform: scale(.93); }
 .round.auto.on { border-color: var(--gold); background: rgba(224, 166, 62, .32); box-shadow: 0 0 14px rgba(224, 166, 62, .55); }
 .round.auto.on small { color: var(--parch); }
 

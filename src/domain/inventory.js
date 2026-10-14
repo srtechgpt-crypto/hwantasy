@@ -1,4 +1,5 @@
 import { clone, fail, integer, itemDef } from './common.js';
+import { bossDef } from './boss.js';
 import { addExp, playerStats } from './progression.js';
 import { TELEPORTS } from '../../data/maps.js';
 import { validate } from './save.js';
@@ -113,6 +114,7 @@ export function sell(save, uid, count, bal) {
 }
 // 안 쓰는 장비(3차 한꺼번에 팔기): 장착 안 함 + 강화 0 + 상점 판매품 + 지금 낀 같은 종류에 비해 모든 능력치가 같거나 낮음.
 // 같은 종류를 끼고 있지 않으면 그 종류는 대상 없음. 강화된 것·보스 장비(shop:false)·더 좋은 것은 절대 대상이 아니다.
+// 비교는 장비의 기본 수치 기준이다(강화로 오른 값은 보지 않음 — 틀려도 '안 파는' 쪽으로만 틀린다. 예: 강철검+6을 끼고 있으면 미스릴검+0은 남긴다).
 export function isJunkGear(save, item, bal) {
   const def = itemDef(item?.id, bal);
   if (!def || !['weapon', 'armor'].includes(def.kind) || !def.shop || item.enchant !== 0 || item.count !== 1) return false;
@@ -202,7 +204,8 @@ export function teleport(save, destId, bal) {
   });
 }
 // 보스 처치: 경험치·돈·드랍 전부·처치 시각을 한 후보에 담는다. 가방에 넘치면 창고로, 창고도 넘치면 ground로 돌려준다
-export function bossKill(save, reward, now, bal) {
+export function bossKill(save, bossId, reward, now, bal) {
+  if (!bossDef(bossId, bal) || !Object.hasOwn(save?.bosses ?? {}, bossId)) return fail('알 수 없는 보스입니다');
   if (!integer(now, 1) || !reward || !integer(reward.exp) || !integer(reward.gold) || !Array.isArray(reward.drops)) return fail('보상 정보가 올바르지 않습니다');
   return transaction(save, bal, next => {
     const before = next.player.level;
@@ -220,7 +223,7 @@ export function bossKill(save, reward, now, bal) {
       if (leftBag - leftWh) toWarehouse.push({ id: drop.id, count: leftBag - leftWh });
       if (leftWh) ground.push({ id: drop.id, count: leftWh });
     }
-    next.boss.defeatedAt = now;
+    next.bosses[bossId] = now;
     return { ok: true, save: next, levelsGained: prog.level - before, toBag, toWarehouse, ground };
   });
 }

@@ -47,7 +47,7 @@ const RATE_ROWS = [
 ];
 const sameRates = (a, b) => Object.keys(bal.rates).every((k) => a[k] === b[k]);
 const rateText = (r) => `경험치 ×${r.exp} · 드랍 ×${r.drop} · 돈 ×${r.gold} · 강화 ×${r.enchant}`;
-// 예상 시간: data/estimate.js(새 기사 기준, 처음부터 30레벨). 없으면 null
+// 예상 시간: data/estimate.js(새 기사 기준, 처음부터 최대 레벨). 없으면 null
 function estSeconds(r) {
   const v = estimate?.seconds?.[`${r.exp}|${r.drop}|${r.gold}`];
   return Number.isFinite(v) && v > 0 ? v : null;
@@ -276,7 +276,7 @@ export function initWindows() {
     const dirty = !sameRates(d, cur.orig);
     return `<div class="rates"><div><div class="presets">${presets}</div>${rows}</div>
       <div class="restim">
-        <p class="sub-t">새 기사가 처음부터 레벨 30까지 자동 사냥하면</p>
+        <p class="sub-t">새 기사가 처음부터 레벨 ${bal.progression.maxLevel}까지 자동 사냥하면</p>
         <p class="big-t">${hm(next)}</p>
         <p class="sub-t">${dirty ? `지금 배율로는 ${hm(now)}` : '지금 쓰는 배율입니다'}</p>
         <p class="sub-t fine-t">100마리마다 마을에서 물약·장비를 사고 안전 강화하는 모의 사냥 기준</p>

@@ -104,13 +104,16 @@ $('btnImport').onclick = () => {
   $('ioAction').onclick = () => {
     const r = saveMod.importCode($('ioText').value.trim(), bal);
     if (!r.ok) { hud.toast(r.reason || '읽을 수 없는 저장 글자입니다'); return; }
-    G.save = r.save;
-    if (G.persist('import')) {
-      hud.toast('불러왔습니다');
-      $('menu').hidden = true; G.pause.delete('menu');
-      hud.rates(G.save.rates);
-      if (G.started) G.scene?.enterGame(false); else startGame(G.save, false);
-    }
+    // 4차: 저장이 성공해야 확정(G.commit). 실패하면 지금 기록은 그대로, 다시 시도해도 가져온 위치를 지금 장면 위치로 덮지 않는다
+    G.commit(r.save, 'import', {
+      keepPosition: true,
+      after: () => {
+        hud.toast('불러왔습니다');
+        $('menu').hidden = true; G.pause.delete('menu');
+        hud.rates(G.save.rates);
+        if (G.started) G.scene?.enterGame(false); else startGame(G.save, false);
+      },
+    });
   };
 };
 $('ioClose').onclick = () => { $('ioBox').hidden = true; };
@@ -176,6 +179,8 @@ $('btnCancelSave').onclick = () => {
   if (!G.pending || G.pending.mustSave) return;
   G.pending = null;
   hud.toast('거래를 취소했습니다');
+  // 시작 화면에서 가져오기를 취소한 경우처럼 지금 기록이 없으면 저장할 것이 없다 — 실패 화면만 닫는다
+  if (!G.save) { G.pause.delete('saveFail'); $('saveFail').hidden = true; return; }
   G.ui?.unbusy();
   if (G.persist('cancel')) G.ui?.refresh();
 };

@@ -2,10 +2,10 @@
 // 바닥(벽·땅·출구·보스 방)은 지역이 바뀔 때 따로 만든 그림에 한 번 그리고,
 // 점(나·몬스터·마을 사람)은 그 바닥 그림을 복사한 위에 다시 그린다(잔상 없음).
 const PX = 2;
-const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55' };
+const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55', ruin: '#5e5068' };
 const WALL = 'rgba(12,14,22,0.85)';
 
-export function createMinimap({ root, wmap, regions, npcs, bossRoom, tile, onToggle }) {
+export function createMinimap({ root, wmap, regions, npcs, bossRooms = [], tile, onToggle }) {
   const box = document.createElement('div');
   box.className = 'minimap';
   const canvas = document.createElement('canvas');
@@ -49,9 +49,11 @@ export function createMinimap({ root, wmap, regions, npcs, bossRoom, tile, onTog
       if (r.x0 > 0 && !wmap.solid[y][r.x0]) bctx.fillRect(0, y * PX, PX, PX);
       if (r.x1 < wmap.solid[0].length && !wmap.solid[y][r.x1 - 1]) bctx.fillRect(w - PX, y * PX, PX, PX);
     }
-    if (bossRoom && bossRoom.x0 >= r.x0 && bossRoom.x1 <= r.x1) {
+    // 이 지역 안의 보스 방(4차: 방이 여러 개) — 주황 테두리
+    for (const R of bossRooms) {
+      if (R.x0 < r.x0 || R.x1 > r.x1) continue;
       bctx.strokeStyle = '#ff8a3d'; bctx.lineWidth = 1;
-      bctx.strokeRect((bossRoom.x0 - r.x0) * PX + 0.5, bossRoom.y0 * PX + 0.5, (bossRoom.x1 - bossRoom.x0) * PX - 1, (bossRoom.y1 - bossRoom.y0) * PX - 1);
+      bctx.strokeRect((R.x0 - r.x0) * PX + 0.5, R.y0 * PX + 0.5, (R.x1 - R.x0) * PX - 1, (R.y1 - R.y0) * PX - 1);
     }
   }
 

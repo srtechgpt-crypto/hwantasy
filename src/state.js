@@ -64,6 +64,20 @@ export const hud = {
     el.hidden = base;
     if (el.textContent !== text) el.textContent = text;
   },
+  // 5차 스킬 버튼: 못 배움=자물쇠+Lv, 쿨타임=어두운 부채꼴+남은 초, 아머 켜짐=빛남
+  setSkills(list) {
+    for (const k of list) {
+      const b = $(`btnSkill_${k.id}`);
+      if (!b) continue;
+      const cd = k.learned && k.left > 0 ? k.left / k.total : 0;
+      b.classList.toggle('locked', !k.learned);
+      b.classList.toggle('active', !!k.active);
+      b.style.setProperty('--cd', cd.toFixed(3));
+      const label = !k.learned ? `Lv${k.level}` : k.left > 0 ? `${Math.ceil(k.left / 1000)}` : '';
+      const t = b.querySelector('small');
+      if (t.textContent !== label) t.textContent = label;
+    }
+  },
   setAuto(on) {
     $('btnAuto').classList.toggle('on', on);
     $('autoState').textContent = on ? '켜짐' : '꺼짐';
