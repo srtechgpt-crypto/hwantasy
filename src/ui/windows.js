@@ -12,6 +12,7 @@ import { drawWorldMap, regionAtRatio } from './worldmap.js';
 import { REGIONS, mapIdAt } from '../../data/maps.js';
 import { bossRemainMs } from '../domain/boss.js';
 import { G, hud, josa } from '../state.js';
+import { savePrefs } from './prefs.js';
 
 const $ = (id) => document.getElementById(id);
 const won = (n) => n.toLocaleString('ko-KR');
@@ -141,7 +142,19 @@ export function initWindows() {
   function viewMap() {
     const all = cur.tab === 'all';
     return `<div class="worldmap ${all ? 'all' : 'region'}"><canvas id="worldCanvas"></canvas></div>
-      <p class="maphint">${all ? '지역을 누르면 크게 봅니다' : '손가락으로 밀어 지도를 움직입니다 · ★ 순간이동 도착 · 노란 줄 다른 지역 가는 길 · 주황 네모 보스 방'}</p>`;
+      <p class="maphint">${all ? '지역을 누르면 크게 봅니다' : '손가락으로 밀어 지도를 움직입니다 · ★ 순간이동 도착 · 노란 줄 다른 지역 가는 길 · 주황 네모 보스 방'}</p>
+      <div class="mapbar"><button type="button" class="act" data-act="minitoggle" id="btnMiniToggle">${miniLabel()}</button></div>`;
+  }
+  // 7차: 미니맵 보이기/숨기기(기기 설정 hwantasy.ui). 글자만 바꿔 지도 스크롤은 그대로
+  function miniLabel() { return G.scene?.prefs?.mini === false ? '미니맵 보이기' : '미니맵 숨기기'; }
+  function toggleMini() {
+    const sc = G.scene;
+    if (!sc?.prefs) return;
+    sc.prefs.mini = !sc.prefs.mini;
+    sc.minimap?.setOpen(sc.prefs.mini);
+    savePrefs(sc.prefs); // 저장을 못 하면 이번 실행에만 적용
+    const b = $('btnMiniToggle');
+    if (b) b.textContent = miniLabel();
   }
   function paintMap() {
     clearInterval(mapTimer);
@@ -411,6 +424,7 @@ export function initWindows() {
       // 6차: [+10]·[+100] — 고른 직후(1개 상태)에는 그 수로, 그 뒤로는 누를 때마다 더한다(10 세 번 = 30). 화면에서 최대까지로 자름
       case 'qtyadd': cur.qty = Math.max(1, (cur.qtyFresh ? 0 : cur.qty) + Number(d.v)); cur.qtyFresh = false; break;
       case 'qtyone': cur.qty = 1; cur.qtyFresh = true; break;
+      case 'minitoggle': toggleMini(); return; // 다시 그리지 않음(스크롤 유지)
       case 'equip': deal(inv.equip(s, cur.sel.uid, bal), 'equip', { okText: '장착했습니다' }); return;
       case 'unequip': deal(inv.unequip(s, itemDef(selected(s).id, bal).kind, bal), 'unequip', { okText: '벗었습니다' }); return;
       case 'goEnchant': cur.tab = 'enchant'; cur.confirm = null; cur.fx = null; break;

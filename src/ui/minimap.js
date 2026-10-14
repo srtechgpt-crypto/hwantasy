@@ -5,25 +5,35 @@ const PX = 2;
 const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55', ruin: '#5e5068' };
 const WALL = 'rgba(12,14,22,0.85)';
 
-export function createMinimap({ root, wmap, regions, npcs, bossRooms = [], tile, onToggle }) {
+// 7차: 누르면 큰 지도(onTap). 숨기기·보이기는 큰 지도 창의 버튼이 setOpen으로 한다(숨기면 상자 전체가 사라짐)
+export function createMinimap({ root, wmap, regions, npcs, bossRooms = [], tile, onTap }) {
   const box = document.createElement('div');
   box.className = 'minimap';
+  box.setAttribute('role', 'button');
+  box.setAttribute('aria-label', '지도 열기');
   const canvas = document.createElement('canvas');
-  const label = document.createElement('span');
-  label.className = 'minimap-label';
-  label.textContent = '지도';
-  box.append(canvas, label);
+  box.append(canvas);
   root.append(box);
   const ctx = canvas.getContext('2d');
   const base = document.createElement('canvas');
   const bctx = base.getContext('2d');
   let region = null, open = true, blink = 0;
 
-  // 게임 조작(조이스틱)으로 번지지 않게 막고, 누르면 접기/펴기
-  box.addEventListener('pointerdown', (e) => {
+  // 게임 조작(조이스틱)으로 번지지 않게 누르는 순간을 막고, 손을 뗄 때(같은 상자 안) 한 번만 지도를 연다
+  // 손가락 하나만 따라가고(다른 손가락은 무시), 상자 안에서 뗐을 때만 연다
+  let downId = null;
+  const inside = (e) => { const r = box.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
+  box.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (downId === null) downId = e.pointerId; });
+  box.addEventListener('pointerup', (e) => {
     e.preventDefault(); e.stopPropagation();
-    setOpen(!open); onToggle?.(open);
+    if (downId !== e.pointerId) return;
+    downId = null;
+    if (inside(e)) onTap?.();
   });
+  for (const t of ['pointercancel', 'pointerleave']) box.addEventListener(t, (e) => { if (e.pointerId === downId) downId = null; });
+  // 키보드(Enter·Space)로도 연다
+  box.tabIndex = 0;
+  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap?.(); } });
 
   function setOpen(v) {
     open = v;

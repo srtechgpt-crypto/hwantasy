@@ -165,7 +165,7 @@ export class WorldScene extends Phaser.Scene {
     this.bindButtons();
     this.minimap = createMinimap({
       root: document.getElementById('hud'), wmap: this.wmap, regions: REGIONS, npcs: NPCS, bossRooms: BOSS_ROOMS, tile: TILE,
-      onToggle: (open) => { this.prefs.mini = open; savePrefs(this.prefs); },
+      onTap: () => { if (this.canAct()) G.ui.open('map'); }, // 위쪽 [지도] 버튼과 같은 창
     });
     this.minimap.setOpen(this.prefs.mini);
     this.miniT = 0;

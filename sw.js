@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "649d233d67d5";
+const VERSION = "b11f9f4cd20b";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -80,13 +80,13 @@ const FILES = {
   "src/domain/save.js": "0892e0a4598a60c1d2f1446a7097e41c00a9d37d132fec6d8ad870063a314e26",
   "src/domain/skills.js": "7753df4e71a820d2a5e8c3398ea4db8cdfa17a8824d8d5ab3edd8eb525f7462a",
   "src/main.js": "e565824cd834fecc59ee7f46c113237f7ed0f6405d6f1bd256aebf72cc4e9975",
-  "src/scenes/World.js": "55693376cc34d629afcc47a7d58014496d319ad7c70e410c336de361b3d295b5",
+  "src/scenes/World.js": "9dd0f3267e6a0101271774fa7e34bdcc1b2e6b6a45a4711b17eb9e0fa0846624",
   "src/state.js": "84d1f137e212ac28a631f433d3e6940f1ae41830b201fecc39f2d3d4a4ed44ec",
-  "src/ui/hud.css": "ad93d750e37b806c92e8b626a92ea3b1cea3b704c77a5a892b12258d3d3f1a37",
+  "src/ui/hud.css": "53f8cfeb11e9eb8ee8f66d072a3e1e389b0a9c3ebd278e771464f5818e664291",
   "src/ui/joystick.js": "0e41ee1f5fe089271522647719d2efe3793a207d5799fe964cb628fb17fda602",
-  "src/ui/minimap.js": "7e2446376e92ae5d4b259106a44256b67e389e39cfc0caa57fb552ebfebedb1b",
+  "src/ui/minimap.js": "d9da5373661ac42925847fd7a625cb369f1aaa51048678ef0d2644b93a293caa",
   "src/ui/prefs.js": "1259ebf5125ad039a701cdaa99a048ea936093764213f5e978a710f272dd612f",
-  "src/ui/windows.js": "74a30784c48e2e662c8fdae61b25fdf7b61ee54889e5bb04c18080ace8bf3d03",
+  "src/ui/windows.js": "faa82bfffa96d1678f6931b8ceb50ca67e96c29f0dc6a46dbfc820dc70bde458",
   "src/ui/worldmap.js": "41081b6e8d47b51e7319baf4a2a025fff96f0c80de0b88f2a29f2c6918abbdd9",
   "vendor/phaser.min.js": "e92ddef111ba42e92d316979c732311757093688ea1810591cb7aa2858eba7a7"
 };
