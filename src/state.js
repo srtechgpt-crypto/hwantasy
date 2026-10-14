@@ -55,6 +55,15 @@ export const hud = {
     if (b.textContent !== want) b.textContent = want;
     b.classList.toggle('talk', !!name);
   },
+  // 배율이 기본(모두 ×1)이 아니면 장소 옆에 작은 표: 경험치·드랍·돈이 같으면 "×5", 다르면 "배율"
+  rates(r) {
+    const el = $('hudRate');
+    if (!el || !r) return;
+    const base = Object.values(r).every((v) => v === 1);
+    const text = base ? '' : r.exp === r.drop && r.drop === r.gold && r.exp !== 1 ? `×${r.exp}` : '배율';
+    el.hidden = base;
+    if (el.textContent !== text) el.textContent = text;
+  },
   setAuto(on) {
     $('btnAuto').classList.toggle('on', on);
     $('autoState').textContent = on ? '켜짐' : '꺼짐';

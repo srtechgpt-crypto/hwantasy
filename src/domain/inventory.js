@@ -111,6 +111,36 @@ export function sell(save, uid, count, bal) {
     return { ok: true, save: next };
   });
 }
+// 안 쓰는 장비(3차 한꺼번에 팔기): 장착 안 함 + 강화 0 + 상점 판매품 + 지금 낀 같은 종류에 비해 모든 능력치가 같거나 낮음.
+// 같은 종류를 끼고 있지 않으면 그 종류는 대상 없음. 강화된 것·보스 장비(shop:false)·더 좋은 것은 절대 대상이 아니다.
+export function isJunkGear(save, item, bal) {
+  const def = itemDef(item?.id, bal);
+  if (!def || !['weapon', 'armor'].includes(def.kind) || !def.shop || item.enchant !== 0 || item.count !== 1) return false;
+  if (Object.values(save.equip).includes(item.uid)) return false;
+  const worn = save.bag.find(other => other.uid === save.equip[def.kind]);
+  const wd = worn && itemDef(worn.id, bal);
+  if (!wd) return false;
+  return def.kind === 'weapon' ? def.min <= wd.min && def.max <= wd.max : def.def <= wd.def;
+}
+export function junkGear(save, bal) {
+  return save.bag.filter(item => isJunkGear(save, item, bal)).map(item => item.uid);
+}
+// uids를 한 번에 판다. 최신 save에서 하나라도 안 쓰는 장비 조건을 벗어나면 전체 실패(원본 그대로)
+export function sellJunk(save, uids, bal) {
+  if (!Array.isArray(uids) || !uids.length || uids.some(uid => !integer(uid, 1)) || new Set(uids).size !== uids.length) return fail('팔 장비 목록이 올바르지 않습니다');
+  return transaction(save, bal, next => {
+    let gold = 0;
+    for (const uid of uids) {
+      const item = next.bag.find(it => it.uid === uid);
+      if (!item || !isJunkGear(next, item, bal)) return fail('팔 수 없는 장비가 섞여 있습니다');
+      gold += sellPrice(item.id, bal);
+    }
+    if (!integer(next.player.gold + gold)) return fail('돈 한도를 초과했습니다');
+    next.bag = next.bag.filter(it => !uids.includes(it.uid));
+    next.player.gold += gold;
+    return { ok: true, save: next, gold, count: uids.length };
+  });
+}
 // 지금 살 수 있는 최대 수량: 돈 한도와 가방 자리(같은 묶음의 남은 자리 + 빈 칸) 중 작은 값
 export function maxBuy(save, id, bal) {
   const def = itemDef(id, bal);

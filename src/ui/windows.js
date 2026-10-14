@@ -5,6 +5,8 @@ import * as inv from '../domain/inventory.js';
 import { enchantInfo, tryEnchant } from '../domain/enchant.js';
 import { playerStats } from '../domain/progression.js';
 import { itemDef } from '../domain/common.js';
+import { validate } from '../domain/save.js';
+import estimate from '../../data/estimate.js';
 import { G, hud, josa } from '../state.js';
 
 const $ = (id) => document.getElementById(id);
@@ -21,7 +23,7 @@ const SHOP_GOODS = {
 };
 const TITLES = {
   bag: ['가방', 'weaponScroll'], shop: ['잡화상 노인', 'potion'], smith: ['대장장이', 'ironSword'],
-  bank: ['창고지기', 'armorScroll'], tele: ['순간이동 마법사', 'returnScroll'],
+  bank: ['창고지기', 'armorScroll'], tele: ['순간이동 마법사', 'returnScroll'], rates: ['배율', 'rates'],
 };
 const TABS = {
   bag: [['items', '가방'], ['enchant', '강화']],
@@ -29,14 +31,42 @@ const TABS = {
   smith: [['buy', '사기'], ['sell', '팔기'], ['enchant', '강화']],
   bank: [['bank', '맡기기·찾기']],
   tele: [['tele', '목적지']],
+  rates: [['rates', '배율 고르기']],
 };
+// 배율(3차): 묶음 버튼과 줄 이름. 값은 bal.rates 목록 안에서만 고른다
+const PRESETS = [
+  { id: 'base', name: '기본', tag: '×1', rates: { exp: 1, drop: 1, gold: 1, enchant: 1 } },
+  { id: 'fast', name: '빠름', tag: '×5', rates: { exp: 5, drop: 5, gold: 5, enchant: 1.5 } },
+  { id: 'rush', name: '쾌속', tag: '×20', rates: { exp: 20, drop: 20, gold: 20, enchant: 2 } },
+];
+const RATE_ROWS = [
+  ['exp', '경험치', '몬스터를 잡으면 받는 경험치'],
+  ['drop', '드랍', '물약·주문서·장비가 떨어질 확률'],
+  ['gold', '돈', '몬스터가 떨어뜨리는 돈'],
+  ['enchant', '강화', '위험 단계(무기 +7부터) 성공률'],
+];
+const sameRates = (a, b) => Object.keys(bal.rates).every((k) => a[k] === b[k]);
+const rateText = (r) => `경험치 ×${r.exp} · 드랍 ×${r.drop} · 돈 ×${r.gold} · 강화 ×${r.enchant}`;
+// 예상 시간: data/estimate.js(새 기사 기준, 처음부터 30레벨). 없으면 null
+function estSeconds(r) {
+  const v = estimate?.seconds?.[`${r.exp}|${r.drop}|${r.gold}`];
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+function hm(sec) {
+  if (sec === null) return '계산 전';
+  const m = Math.max(1, Math.round(sec / 60));
+  if (m < 60) return `약 ${m}분`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  return `약 ${h}시간${mm ? ` ${mm}분` : ''}`;
+}
 
 export function initWindows() {
   let cur = null; // { kind, tab, sel:{where,uid}|null, buyId, qty, confirm, busy, fx }
 
   function open(kind, opts = {}) {
     if (!G.save || G.pending) return;
-    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, confirm: null, busy: false, fx: null };
+    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, confirm: null, busy: false, fx: null, junk: null };
+    if (kind === 'rates') { cur.orig = { ...G.save.rates }; cur.draft = { ...G.save.rates }; }
     G.pause.add('window');
     G.scene?.releaseInput();
     $('win').hidden = false;
@@ -76,7 +106,7 @@ export function initWindows() {
       ? TABS[cur.kind].map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
       : '';
     $('winGold').textContent = won(s.player.gold);
-    const body = { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele }[cur.tab];
+    const body = { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates }[cur.tab];
     $('winBody').innerHTML = body(s);
     $('winBody').dataset.view = cur.tab;
   }
@@ -204,7 +234,57 @@ export function initWindows() {
         <div class="btns"><button type="button" class="act primary" data-act="sell" ${eq ? 'disabled' : ''}>팔기</button></div>
         ${eq ? '<p class="hint">먼저 가방에서 벗어 주세요.</p>' : ''}</div>`;
     }
-    return `<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}<div class="side">${side}</div></div>`;
+    return `${junkBar(s)}<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}<div class="side">${side}</div></div>`;
+  }
+
+  // 안 쓰는 장비 모두 팔기(3차): 확인할 때 목록·금액을 고정하고, 팔 때 최신 기록으로 다시 확인한다
+  function junkInfo(s, uids) {
+    const items = uids.map((uid) => s.bag.find((i) => i.uid === uid)).filter(Boolean);
+    const gold = items.reduce((sum, it) => sum + inv.sellPrice(it.id, bal), 0);
+    const names = new Map();
+    for (const it of items) names.set(itemName(it), (names.get(itemName(it)) ?? 0) + 1);
+    return { uids, gold, text: [...names].map(([n, c]) => `${n} ${c}`).join(', ') };
+  }
+  function junkBar(s) {
+    if (cur.junk) {
+      return `<div class="warnbox junkbox"><p><b>${esc(cur.junk.text)}</b> — 모두 <b class="gold-t">${won(cur.junk.gold)}원</b>에 팝니다. 강화한 장비·보스 장비·지금 것보다 좋은 장비는 팔지 않습니다.</p>
+        <div class="btns"><button type="button" class="act primary" data-act="doJunk" ${cur.busy ? 'disabled' : ''}>모두 팔기</button><button type="button" class="act" data-act="cancelJunk">그만두기</button></div></div>`;
+    }
+    const uids = inv.junkGear(s, bal);
+    if (!uids.length) return '';
+    const j = junkInfo(s, uids);
+    return `<div class="junkbar"><button type="button" class="act" data-act="askJunk">안 쓰는 장비 모두 팔기</button><span>${uids.length}개 · <b class="gold-t">+${won(j.gold)}원</b></span></div>`;
+  }
+
+  // 배율(3차): 위 묶음 버튼, 가운데 네 줄(◀ 값 ▶), 오른쪽 예상 시간과 [적용]
+  function viewRates(s) {
+    const d = cur.draft;
+    const presets = PRESETS.map((p) => `<button type="button" class="preset ${sameRates(d, p.rates) ? 'on' : ''}" data-act="preset" data-id="${p.id}"><b>${p.name}</b><span>${p.tag}</span></button>`).join('');
+    const rows = RATE_ROWS.map(([key, name, desc]) => {
+      const list = bal.rates[key], i = list.indexOf(d[key]);
+      const changed = d[key] !== cur.orig[key];
+      return `<div class="rrow ${changed ? 'changed' : ''}"><span class="rname">${name}</span>
+        <button type="button" class="rbtn" data-act="rstep" data-key="${key}" data-d="-1" ${i <= 0 ? 'disabled' : ''} aria-label="${name} 낮추기">◀</button>
+        <b class="rval">×${d[key]}</b>
+        <button type="button" class="rbtn" data-act="rstep" data-key="${key}" data-d="1" ${i >= list.length - 1 ? 'disabled' : ''} aria-label="${name} 높이기">▶</button>
+        <span class="rdesc">${desc}</span></div>`;
+    }).join('');
+    // 강화 예: 무기 첫 위험 단계(+7) 성공률, 지금 → 고른 값
+    const w = bal.enchant.weapon, first = w.riskyChances[0];
+    const pct = (r) => `${Math.round(Math.min(1, first * r) * 100)}%`;
+    const now = estSeconds(cur.orig), next = estSeconds(d);
+    const dirty = !sameRates(d, cur.orig);
+    return `<div class="rates"><div><div class="presets">${presets}</div>${rows}</div>
+      <div class="restim">
+        <p class="sub-t">새 기사가 처음부터 레벨 30까지 자동 사냥하면</p>
+        <p class="big-t">${hm(next)}</p>
+        <p class="sub-t">${dirty ? `지금 배율로는 ${hm(now)}` : '지금 쓰는 배율입니다'}</p>
+        <p class="sub-t fine-t">100마리마다 마을에서 물약·장비를 사고 안전 강화하는 모의 사냥 기준</p>
+        <p class="sub-t">무기 +${w.safe + 1} 강화 성공 ${pct(cur.orig.enchant)}${d.enchant !== cur.orig.enchant ? ` → <b class="gold-t">${pct(d.enchant)}</b>` : ''}</p>
+        <div class="btns"><button type="button" class="act primary" data-act="rapply" ${dirty && !cur.busy ? '' : 'disabled'}>적용</button>
+          <button type="button" class="act" data-act="rreset" ${dirty ? '' : 'disabled'}>되돌리기</button></div>
+        <p class="sub-t">언제든 다시 바꿀 수 있습니다. 바꾸면 다음 사냥부터 바로 적용됩니다.</p>
+      </div></div>`;
   }
 
   // 창고
@@ -285,6 +365,17 @@ export function initWindows() {
       case 'cancelConfirm': cur.confirm = null; break;
       case 'doEnchant': doEnchant(); return;
       case 'tele': doTeleport(d.id); return;
+      case 'askJunk': cur.junk = junkInfo(s, inv.junkGear(s, bal)); cur.sel = null; msg(''); break;
+      case 'cancelJunk': cur.junk = null; break;
+      case 'doJunk': doJunk(); return;
+      case 'preset': { const p = PRESETS.find((x) => x.id === d.id); if (p) cur.draft = { ...p.rates }; msg(''); break; }
+      case 'rstep': {
+        const list = bal.rates[d.key], i = list.indexOf(cur.draft[d.key]) + Number(d.d);
+        if (i >= 0 && i < list.length) cur.draft = { ...cur.draft, [d.key]: list[i] };
+        msg(''); break;
+      }
+      case 'rreset': cur.draft = { ...cur.orig }; msg(''); break;
+      case 'rapply': doRates(); return;
       default: return;
     }
     render();
@@ -313,6 +404,40 @@ export function initWindows() {
     if (!ok && !G.pending) cur.busy = false;
   }
 
+  function doJunk() {
+    if (cur.busy || !cur.junk) return;
+    const fixed = cur.junk;
+    const res = inv.sellJunk(G.save, fixed.uids, bal);
+    // 확인한 뒤 기록이 바뀌어 목록·금액이 달라졌으면 팔지 않고 다시 확인받는다
+    if (!res.ok) { cur.junk = null; msg(res.reason || '팔 수 없습니다', true); render(); return; }
+    if (res.gold !== fixed.gold) { cur.junk = null; msg('팔 목록이 바뀌었습니다. 다시 확인해 주세요', true); render(); return; }
+    cur.busy = true;
+    const ok = deal(res, 'sellJunk', {
+      okText: `안 쓰는 장비 ${won(res.count)}개를 팔았습니다 (+${won(res.gold)}원)`,
+      after: () => { if (cur) { cur.busy = false; cur.junk = null; cur.sel = null; } hud.log(`안 쓰는 장비 ${won(res.count)}개 판매 · +${won(res.gold)}원`); },
+    });
+    if (!ok && !G.pending) { cur.busy = false; render(); }
+  }
+
+  function doRates() {
+    if (cur.busy) return;
+    const next = { ...cur.draft };
+    const cand = { ...G.save, rates: next };
+    // 잘못된 값이면 저장 재시도 상태로 보내지 않고 바로 알린다
+    if (!validate(cand, bal).ok) { msg('고를 수 없는 배율입니다', true); return; }
+    cur.busy = true;
+    const ok = deal({ ok: true, save: cand }, 'rates', {
+      okText: '배율을 바꿨습니다',
+      after: () => {
+        if (cur && cur.kind === 'rates') { cur.busy = false; cur.orig = { ...G.save.rates }; cur.draft = { ...G.save.rates }; }
+        hud.toast(`배율을 바꿨습니다 · ${rateText(G.save.rates)}`, 2400);
+        hud.log(`배율 변경 · ${rateText(G.save.rates)}`);
+        hud.rates(G.save.rates);
+      },
+    });
+    if (!ok && !G.pending) { cur.busy = false; render(); }
+  }
+
   function doTeleport(id) {
     const s = G.save;
     const here = { ...s, player: { ...s.player, ...G.scene.positionOf() } };
@@ -323,5 +448,8 @@ export function initWindows() {
     });
   }
 
-  return { open, close, refresh: render, get isOpen() { return !!cur; } };
+  // 저장 실패 → [그만두기]로 거래를 취소하면 창의 '처리 중'을 풀고 다시 그린다(취소 뒤 저장이 또 실패해도 창이 잠기지 않게)
+  function unbusy() { if (!cur) return; cur.busy = false; cur.junk = null; render(); }
+
+  return { open, close, unbusy, refresh: render, get isOpen() { return !!cur; } };
 }

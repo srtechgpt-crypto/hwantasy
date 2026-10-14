@@ -654,8 +654,14 @@ export class WorldScene extends Phaser.Scene {
       if (now > g.until) { this.removeDrop(g); continue; }
       g.sprite.setAlpha(g.until - now < 5000 ? 0.4 + 0.4 * Math.sin(now / 120) : 1);
     }
-    const near = this.groundItems.filter((g) => Math.hypot(g.x - this.knight.x, g.y - this.knight.y) < PICKUP_RANGE);
-    if (!near.length) return;
+    const touching = this.groundItems.filter((g) => Math.hypot(g.x - this.knight.x, g.y - this.knight.y) < PICKUP_RANGE);
+    if (!touching.length) return;
+    // 지금 기록으로 들어갈 수 없는 것(가득 찬 가방의 장비 등)은 매 프레임 다시 시도하지 않는다(G.save가 바뀌면 다시 계산)
+    const near = touching.filter((g) => this.canAccept(g));
+    if (!near.length) {
+      if (!this.bagFullToastAt || now - this.bagFullToastAt > 8000) { this.bagFullToastAt = now; hud.toast('가방이 가득 차서 주울 수 없습니다'); }
+      return;
+    }
     let cand = G.save;
     const took = [];
     for (const g of near) {
@@ -765,6 +771,9 @@ export class WorldScene extends Phaser.Scene {
   runAuto(dt) {
     const s = G.save, st = this.stats();
     const bagFull = s.bag.length >= bal.inventory.bagSlots;
+    // 3차: 가방이 차도 귀환하지 않고 계속 사냥 → 처음 찰 때 한 번 알림
+    if (bagFull && !this.bagFullNoted) { this.bagFullNoted = true; hud.log('<span style="color:#9fd8ff">가방이 가득 찼습니다 — 들어가지 않는 물건은 두고 계속 사냥합니다</span>'); }
+    else if (!bagFull) this.bagFullNoted = false;
     const ctx = {
       player: { x: this.knight.x, y: this.knight.y, hp: s.player.hp, maxHp: st.maxHp },
       center: this.autoCenter || { x: this.knight.x, y: this.knight.y },

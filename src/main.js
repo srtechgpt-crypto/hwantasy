@@ -64,12 +64,21 @@ function startGame(save, isNew) {
   $('hud').hidden = $('pad').hidden = false;
   G.pause.delete('title');
   if (isNew) G.persist('new');
+  hud.rates(G.save.rates);
   G.scene?.enterGame(isNew);
 }
 
 // ---------- 메뉴 ----------
 $('btnBag').onclick = () => { if (G.started && !G.pending) G.ui.open('bag'); };
-$('btnMenu').onclick = () => { $('menu').hidden = false; $('ioBox').hidden = true; G.pause.add('menu'); };
+$('btnMenu').onclick = () => {
+  $('menu').hidden = false; $('ioBox').hidden = true; G.pause.add('menu');
+  $('menuRate').textContent = G.save ? `(경험치 ×${G.save.rates.exp} · 드랍 ×${G.save.rates.drop} · 돈 ×${G.save.rates.gold} · 강화 ×${G.save.rates.enchant})` : '';
+  $('btnRates').hidden = !G.started;
+};
+// 배율 창: 메뉴를 닫고 가방·상점과 같은 창으로 연다(창이 열려 있는 동안 게임 멈춤)
+const openRates = () => { if (!G.started || G.pending) return; $('menu').hidden = true; G.pause.delete('menu'); G.ui.open('rates'); };
+$('btnRates').onclick = openRates;
+$('hudRate').onclick = openRates;
 $('btnResume').onclick = () => { $('menu').hidden = true; G.pause.delete('menu'); };
 $('btnSaveNow').onclick = () => { if (G.persist('menu')) hud.toast('저장했습니다'); };
 $('btnToTitle').onclick = () => { G.ui.close(); G.persist('title'); G.scene?.leaveGame(); showTitle(); G.pause.delete('menu'); };
@@ -99,6 +108,7 @@ $('btnImport').onclick = () => {
     if (G.persist('import')) {
       hud.toast('불러왔습니다');
       $('menu').hidden = true; G.pause.delete('menu');
+      hud.rates(G.save.rates);
       if (G.started) G.scene?.enterGame(false); else startGame(G.save, false);
     }
   };
@@ -166,6 +176,7 @@ $('btnCancelSave').onclick = () => {
   if (!G.pending || G.pending.mustSave) return;
   G.pending = null;
   hud.toast('거래를 취소했습니다');
+  G.ui?.unbusy();
   if (G.persist('cancel')) G.ui?.refresh();
 };
 

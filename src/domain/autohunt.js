@@ -12,9 +12,10 @@ export function decideAuto(ctx, bal) {
   }
   const p = ctx.player, rule = bal.autohunt;
   if (p.hp === 0) return { action: 'stop', reason: '사망했습니다' };
-  if (ctx.potions === 0 || p.hp <= p.maxHp * rule.returnHp || ctx.bagFull) {
+  // 가방이 가득 차도 귀환하지 않는다(3차): 들어가지 않는 물건은 땅에 두고 계속 사냥. ctx.bagFull은 입력 호환용으로만 받는다
+  if (ctx.potions === 0 || p.hp <= p.maxHp * rule.returnHp) {
     if (!ctx.returnScrolls) return { action: 'stop', reason: ctx.potions === 0 ? '물약·귀환 주문서가 없습니다' : '귀환 주문서가 없습니다' };
-    return { action: 'return', reason: ctx.potions === 0 ? '물약이 없습니다' : ctx.bagFull ? '가방이 가득 찼습니다' : '체력이 20% 이하입니다' };
+    return { action: 'return', reason: ctx.potions === 0 ? '물약이 없습니다' : '체력이 20% 이하입니다' };
   }
   if (p.hp <= p.maxHp * rule.potionHp && ctx.potionReady) return { action: 'potion' };
   const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
