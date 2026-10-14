@@ -70,6 +70,7 @@ function startGame(save, isNew) {
 
 // ---------- 메뉴 ----------
 $('btnBag').onclick = () => { if (G.started && !G.pending) G.ui.open('bag'); };
+$('btnMap').onclick = () => { if (G.started && !G.pending) G.ui.open('map'); };
 $('btnMenu').onclick = () => {
   $('menu').hidden = false; $('ioBox').hidden = true; G.pause.add('menu');
   $('menuRate').textContent = G.save ? `(경험치 ×${G.save.rates.exp} · 드랍 ×${G.save.rates.drop} · 돈 ×${G.save.rates.gold} · 강화 ×${G.save.rates.enchant})` : '';

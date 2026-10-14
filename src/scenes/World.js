@@ -11,6 +11,7 @@ import { bossRemainMs, bossReady, normalizeBossTime } from '../domain/boss.js';
 import { decideAuto } from '../domain/autohunt.js';
 import { findPath } from '../domain/path.js';
 import { learnedSkills, skillDef } from '../domain/skills.js';
+import { compareGear } from '../domain/compare.js';
 import { createJoystick } from '../ui/joystick.js';
 import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
@@ -369,6 +370,7 @@ export class WorldScene extends Phaser.Scene {
     const w = itemByUid(G.save, G.save.equip.weapon);
     this.sword.setVisible(false);
     if (w) this.sword.setTint(SWORD_TINT[w.id] ?? 0xffffff);
+    for (const g of this.groundItems) this.refreshDropMark(g);
     this.refreshHud(true);
   }
 
@@ -394,6 +396,11 @@ export class WorldScene extends Phaser.Scene {
       if (G.auto) { this.setAuto(false); return; }
       if (mapIdAt(this.knight.x) === 'town') { hud.toast('자동 사냥은 사냥터에서 켜 주세요'); return; }
       if (inBossRoom(this.knight.x, this.knight.y)) { hud.toast('보스는 직접 싸워 주세요'); return; }
+      // 6차: 켜자마자 귀환(주문서 낭비)하지 않게 — 물약이 없거나 체력이 귀환 기준 이하면 켜지 않고 안내만
+      if (countOf(G.save, 'potion') <= 0) { hud.toast('물약이 없어 자동 사냥을 켜지 않았습니다. 잡화상에서 물약을 사 주세요', 3200); return; }
+      if (G.save.player.hp <= this.stats().maxHp * bal.autohunt.returnHp) {
+        hud.toast(`체력이 ${Math.round(bal.autohunt.returnHp * 100)}% 이하라 자동 사냥을 켜지 않았습니다. 물약을 마시거나 회복한 뒤 켜 주세요`, 3200); return;
+      }
       this.setAuto(true);
     });
   }
@@ -416,7 +423,7 @@ export class WorldScene extends Phaser.Scene {
     this.monsters = [];
     this.bosses = {};
     this.cancelSlam();
-    for (const g of this.groundItems) { this.tweens.killTweensOf(g.sprite); g.sprite.destroy(); }
+    for (const g of this.groundItems) { this.tweens.killTweensOf(g.sprite); g.sprite.destroy(); if (g.mark) { this.tweens.killTweensOf(g.mark); g.mark.destroy(); } }
     this.groundItems = [];
     this.autoItem = null;
   }
@@ -792,7 +799,22 @@ export class WorldScene extends Phaser.Scene {
     sprite.setDepth(9);
     this.tweens.add({ targets: sprite, x: tx, duration: 260, ease: 'Linear' });
     this.tweens.add({ targets: sprite, y: { from: y - 2, to: ty }, duration: 260, ease: 'Bounce.easeOut' });
-    this.groundItems.push({ uid: ++this.dropSeq, kind, id, count, sprite, x: tx, y: ty, until: this.gt + GROUND_ITEM_MS, skipUntil: 0 });
+    const g = { uid: ++this.dropSeq, kind, id, count, sprite, x: tx, y: ty, until: this.gt + GROUND_ITEM_MS, skipUntil: 0, mark: null };
+    this.groundItems.push(g);
+    // 6차: 장비면 지금 낀 것과 비교해 ▲(초록)/▼(빨강)을 아이콘 오른쪽 위에
+    if (kind === 'item') {
+      g.mark = this.add.text(tx + 5, ty - 6, '', { fontFamily: 'system-ui, sans-serif', fontSize: '7px', fontStyle: 'bold', stroke: '#000', strokeThickness: 2, resolution: 4 })
+        .setOrigin(0.5).setDepth(9.5).setAlpha(0);
+      this.tweens.add({ targets: g.mark, alpha: 1, delay: 270, duration: 120 }); // 아이콘이 튀어 떨어진(0.26초) 뒤에 나타남
+      this.refreshDropMark(g);
+    }
+  }
+
+  // 땅 장비의 ▲/▼(장착이 바뀌면 다시 계산)
+  refreshDropMark(g) {
+    if (!g.mark) return;
+    const c = compareGear(G.save, g.id, 0, bal);
+    g.mark.setText(c === 'up' ? '▲' : c === 'down' ? '▼' : '').setColor(c === 'up' ? '#5fe07a' : '#ff6b5e');
   }
 
   // 가방에 들어갈 수 있는지(돈은 항상). G.save가 바뀔 때만 다시 계산
@@ -853,6 +875,7 @@ export class WorldScene extends Phaser.Scene {
     const i = this.groundItems.indexOf(g);
     if (i >= 0) this.groundItems.splice(i, 1);
     this.tweens.killTweensOf(g.sprite); g.sprite.destroy();
+    if (g.mark) { this.tweens.killTweensOf(g.mark); g.mark.destroy(); }
     if (this.autoItem === g.uid) this.autoItem = null;
   }
 
@@ -876,6 +899,8 @@ export class WorldScene extends Phaser.Scene {
     G.save = res.save;
     this.teleportTown();
     hud.log(why === '직접' ? '귀환 주문서를 읽어 마을로 돌아왔습니다' : `${why} — 귀환 주문서로 마을에 돌아왔습니다`);
+    // 6차: 자동 귀환은 이유를 화면 가운데에도(귀환에 성공했을 때만 여기까지 옴)
+    if (why !== '직접') hud.toast(`${why.replace(/^자동 사냥\((.*)\)$/, '$1')} — 마을로 귀환했습니다`, 3000);
     G.persist('return');
     return true;
   }

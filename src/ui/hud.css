@@ -120,6 +120,14 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .cell.dim { opacity: .4; }
 .cell .n { position: absolute; right: 2px; bottom: 0; font-size: 11px; font-weight: 700; text-shadow: 0 1px 1px #000, 0 0 2px #000; font-variant-numeric: tabular-nums; }
 .cell .e { position: absolute; left: 2px; top: 0; font-size: 10px; font-weight: 700; color: #ffd36a; text-shadow: 0 1px 1px #000; }
+.cmp { font-size: 11px; font-weight: 900; line-height: 1; text-shadow: 0 1px 1px #000, 0 0 2px #000; }
+.cmp.up { color: #5fe07a; }
+.cmp.down { color: #ff6b5e; }
+.cell .cmp { position: absolute; right: 2px; top: 1px; }
+.row-item .cmp { margin-left: 4px; }
+.cmpline { margin: 2px 0; font-size: 13px; font-weight: 700; color: var(--muted); }
+.cmpline.up { color: #5fe07a; }
+.cmpline.down { color: #ff6b5e; }
 .cell .eqm { position: absolute; right: 1px; top: 0; font-size: 9px; font-weight: 700; color: #111; background: var(--gold); border-radius: 2px; padding: 0 2px; line-height: 12px; }
 
 .detail { display: grid; gap: 6px; justify-items: start; }
@@ -136,6 +144,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 .qty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .qty button { min-width: 40px; min-height: 36px; border-radius: 5px; background: rgba(0,0,0,.35); border: 1px solid var(--line); font-size: 13px; }
+.qtyhint { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
 .qty b { min-width: 46px; text-align: center; font-size: 16px; font-variant-numeric: tabular-nums; }
 
 .list { display: grid; gap: 4px; min-width: 230px; }
@@ -210,3 +219,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media (max-height: 380px) { .rrow { min-height: 42px; } .preset { min-height: 40px; } }
 @media (max-width: 760px) { .rates { grid-template-columns: 1fr; } .rdesc { display: none; } .rrow { grid-template-columns: 54px 44px 64px 44px; } }
 .fine-t { font-size: 11px !important; opacity: .8; }
+
+/* 6차 큰 지도 */
+.worldmap { max-height: min(62vh, 520px); overflow: auto; border-radius: 6px; border: 1px solid var(--line); background: #0b0d14; -webkit-overflow-scrolling: touch; }
+.worldmap.all canvas { width: 100%; height: auto; display: block; cursor: pointer; }
+.worldmap.region canvas { display: block; max-width: none; }
+.maphint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }

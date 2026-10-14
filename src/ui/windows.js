@@ -5,8 +5,12 @@ import * as inv from '../domain/inventory.js';
 import { enchantInfo, tryEnchant } from '../domain/enchant.js';
 import { playerStats } from '../domain/progression.js';
 import { itemDef } from '../domain/common.js';
+import { compareGear, compareDetail } from '../domain/compare.js';
 import { validate } from '../domain/save.js';
 import estimate from '../../data/estimate.js';
+import { drawWorldMap, regionAtRatio } from './worldmap.js';
+import { REGIONS, mapIdAt } from '../../data/maps.js';
+import { bossRemainMs } from '../domain/boss.js';
 import { G, hud, josa } from '../state.js';
 
 const $ = (id) => document.getElementById(id);
@@ -16,6 +20,21 @@ const isGear = (id) => ['weapon', 'armor'].includes(itemDef(id, bal)?.kind);
 const icon = (id, cls = '') => `<img class="ic ${cls}" src="assets/icons/${id}.png" alt="">`;
 const itemName = (it) => `${it.enchant ? `+${it.enchant} ` : ''}${itemDef(it.id, bal)?.name ?? it.id}`;
 const equipped = (s, uid) => s.equip.weapon === uid || s.equip.armor === uid;
+// 6차: 지금 낀 같은 종류 장비보다 좋으면 초록 ▲, 나쁘면 빨강 ▼(같거나 장비가 아니면 없음)
+// 상세 칸 한 줄: "지금 장비보다 평균 공격 +2.5 ▲"
+const cmpLine = (s, id, enchant = 0) => {
+  const c = compareDetail(s, id, enchant, bal);
+  if (!c) return '';
+  const what = c.kind === 'weapon' ? '평균 공격' : '방어';
+  const n = Math.round(Math.abs(c.diff) * 10) / 10;
+  if (!c.worn) return `<p class="cmpline up">▲ 지금 ${c.kind === 'weapon' ? '무기' : '갑옷'}를 안 끼고 있음</p>`;
+  return c.dir === 'same' ? `<p class="cmpline">지금 장비와 ${what} 같음</p>`
+    : `<p class="cmpline ${c.dir}">${c.dir === 'up' ? '▲' : '▼'} 지금 장비보다 ${what} ${c.dir === 'up' ? '+' : '−'}${n}</p>`;
+};
+const cmpMark = (s, id, enchant = 0) => {
+  const c = compareGear(s, id, enchant, bal);
+  return c === 'up' ? '<span class="cmp up" title="지금 장비보다 좋음">▲</span>' : c === 'down' ? '<span class="cmp down" title="지금 장비보다 낮음">▼</span>' : '';
+};
 
 const SHOP_GOODS = {
   shop: bal.consumables.filter((c) => c.shop).map((c) => c.id),
@@ -23,7 +42,7 @@ const SHOP_GOODS = {
 };
 const TITLES = {
   bag: ['가방', 'weaponScroll'], shop: ['잡화상 노인', 'potion'], smith: ['대장장이', 'ironSword'],
-  bank: ['창고지기', 'armorScroll'], tele: ['순간이동 마법사', 'returnScroll'], rates: ['배율', 'rates'],
+  bank: ['창고지기', 'armorScroll'], tele: ['순간이동 마법사', 'returnScroll'], rates: ['배율', 'rates'], map: ['지도', 'map'],
 };
 const TABS = {
   bag: [['items', '가방'], ['enchant', '강화']],
@@ -32,6 +51,8 @@ const TABS = {
   bank: [['bank', '맡기기·찾기']],
   tele: [['tele', '목적지']],
   rates: [['rates', '배율 고르기']],
+  // 6차 큰 지도: [전체] + 지역마다 한 탭(지역 이름은 짧게)
+  map: [['all', '전체'], ...REGIONS.map((r) => [r.id, r.name.split(' ').pop()])],
 };
 // 배율(3차): 묶음 버튼과 줄 이름. 값은 bal.rates 목록 안에서만 고른다
 const PRESETS = [
@@ -65,7 +86,9 @@ export function initWindows() {
 
   function open(kind, opts = {}) {
     if (!G.save || G.pending) return;
-    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, confirm: null, busy: false, fx: null, junk: null };
+    // 지도는 지금 있는 지역 탭으로 연다
+    if (kind === 'map' && !opts.tab && G.scene?.knight) opts = { ...opts, tab: mapIdAt(G.scene.knight.x) };
+    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, qtyFresh: true, confirm: null, busy: false, fx: null, junk: null };
     if (kind === 'rates') { cur.orig = { ...G.save.rates }; cur.draft = { ...G.save.rates }; }
     G.pause.add('window');
     G.scene?.releaseInput();
@@ -75,6 +98,7 @@ export function initWindows() {
   function close() {
     if (!cur) return;
     if (cur.busy) return;
+    clearInterval(mapTimer); mapTimer = 0;
     cur = null;
     $('win').hidden = true;
     G.pause.delete('window');
@@ -106,9 +130,56 @@ export function initWindows() {
       ? TABS[cur.kind].map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
       : '';
     $('winGold').textContent = won(s.player.gold);
-    const body = { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates }[cur.tab];
+    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates }[cur.tab];
     $('winBody').innerHTML = body(s);
-    $('winBody').dataset.view = cur.tab;
+    $('winBody').dataset.view = cur.kind === 'map' ? 'map' : cur.tab;
+    if (cur.kind === 'map') paintMap();
+  }
+
+  // ---------- 6차 큰 지도 ----------
+  let mapTimer = 0; // 열려 있는 동안 1초마다 다시 그림(보스 남은 시간). 스크롤 위치는 그대로
+  function viewMap() {
+    const all = cur.tab === 'all';
+    return `<div class="worldmap ${all ? 'all' : 'region'}"><canvas id="worldCanvas"></canvas></div>
+      <p class="maphint">${all ? '지역을 누르면 크게 봅니다' : '손가락으로 밀어 지도를 움직입니다 · ★ 순간이동 도착 · 노란 줄 다른 지역 가는 길 · 주황 네모 보스 방'}</p>`;
+  }
+  function paintMap() {
+    clearInterval(mapTimer);
+    mapTimer = setInterval(() => { if (cur?.kind === 'map' && $('worldCanvas')) drawMapOnly(); else { clearInterval(mapTimer); mapTimer = 0; } }, 1000);
+    drawMapOnly();
+    placeMap();
+  }
+  function drawMapOnly() {
+    const canvas = $('worldCanvas'), sc = G.scene;
+    if (!canvas || !sc?.wmap) return;
+    drawWorldMap(canvas, {
+      view: cur.tab, wmap: sc.wmap, knight: sc.knight,
+      bossState: (id) => ({ alive: !!sc.bosses?.[id]?.alive, remainMs: bossRemainMs(G.save.bosses?.[id] ?? null, Date.now(), bal) }),
+    });
+  }
+  // 처음 그릴 때만: 누르기·크기·내 위치로 스크롤
+  function placeMap() {
+    const canvas = $('worldCanvas'), sc = G.scene;
+    if (!canvas || !sc?.wmap) return;
+    if (cur.tab === 'all') {
+      canvas.onclick = (e) => {
+        const r = canvas.getBoundingClientRect();
+        const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+        if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
+        const id = regionAtRatio(fx, sc.wmap);
+        if (id) { cur.tab = id; render(); }
+      };
+    } else {
+      // 지역 지도는 크게(그림 칸 0.75배 이상, 창 너비는 다 채움) 보여 주고 내 위치가 가운데 오게 스크롤
+      const box = canvas.parentElement, me = sc.knight;
+      const k = Math.min(1.25, Math.max(0.75, box.clientWidth / canvas.width)); // 마을처럼 좁은 지역은 너무 커지지 않게
+      canvas.style.width = `${Math.round(canvas.width * k)}px`;
+      const reg = REGIONS.find((x) => x.id === cur.tab);
+      if (reg && me && mapIdAt(me.x) === reg.id) {
+        box.scrollLeft = ((me.x / 16 - reg.x0) * 12 * k) - box.clientWidth / 2;
+        box.scrollTop = ((me.y / 16) * 12 * k) - box.clientHeight / 2;
+      }
+    }
   }
 
   function grid(list, where, cap, s, { dimEquipped = false } = {}) {
@@ -119,7 +190,7 @@ export function initWindows() {
       const on = cur.sel && cur.sel.where === where && cur.sel.uid === it.uid;
       const eq = where === 'bag' && equipped(s, it.uid);
       cells.push(`<button type="button" class="cell ${on ? 'on' : ''} ${eq ? 'eq' : ''} ${eq && dimEquipped ? 'dim' : ''}" data-act="sel" data-where="${where}" data-uid="${it.uid}">
-        ${icon(it.id)}${it.count > 1 ? `<span class="n">${it.count}</span>` : ''}${it.enchant ? `<span class="e">+${it.enchant}</span>` : ''}${eq ? '<span class="eqm">E</span>' : ''}</button>`);
+        ${icon(it.id)}${it.count > 1 ? `<span class="n">${it.count}</span>` : ''}${it.enchant ? `<span class="e">+${it.enchant}</span>` : ''}${eq ? '<span class="eqm">E</span>' : cmpMark(s, it.id, it.enchant ?? 0)}</button>`);
     }
     return `<div class="grid g${where}">${cells.join('')}</div>`;
   }
@@ -154,8 +225,9 @@ export function initWindows() {
     cur.qty = Math.max(1, Math.min(cur.qty, Math.max(1, max)));
     return `<div class="qty">
       <button type="button" data-act="qty" data-d="-1">−</button><b>${won(cur.qty)}</b><button type="button" data-act="qty" data-d="1">+</button>
-      <button type="button" data-act="qtyset" data-v="1">1</button><button type="button" data-act="qtyset" data-v="10">10</button>
-      <button type="button" data-act="qtyset" data-v="100">100</button><button type="button" data-act="qtyset" data-v="${max}">최대</button></div>`;
+      <button type="button" data-act="qtyadd" data-v="10">+10</button><button type="button" data-act="qtyadd" data-v="100">+100</button>
+      <button type="button" data-act="qtyset" data-v="${max}">최대</button><button type="button" data-act="qtyone">1로</button></div>
+      <p class="qtyhint">[+10]·[+100]은 누를 때마다 더해집니다(처음 누르면 그 수로)</p>`;
   }
 
   // 가방
@@ -164,7 +236,7 @@ export function initWindows() {
     let side = '<p class="hint">칸을 누르면 설명과 버튼이 나옵니다.</p>';
     if (it) {
       const gear = isGear(it.id), eq = equipped(s, it.uid);
-      side = `<div class="detail">${icon(it.id, 'big')}<h3>${esc(itemName(it))}${it.count > 1 ? ` × ${won(it.count)}` : ''}</h3><p>${itemInfo(it)}</p>
+      side = `<div class="detail">${icon(it.id, 'big')}<h3>${esc(itemName(it))}${it.count > 1 ? ` × ${won(it.count)}` : ''}</h3><p>${itemInfo(it)}</p>${equipped(s, it.uid) ? '' : cmpLine(s, it.id, it.enchant ?? 0)}
         <div class="btns">${gear ? (eq ? '<button type="button" class="act" data-act="unequip">벗기</button>' : '<button type="button" class="act primary" data-act="equip">장착</button>') : ''}
         ${gear ? '<button type="button" class="act" data-act="goEnchant">강화</button>' : ''}
         ${it.id === 'returnScroll' ? '<p class="hint">귀환은 오른쪽 아래 [귀환] 버튼으로 읽습니다.</p>' : ''}
@@ -208,12 +280,12 @@ export function initWindows() {
     if (!cur.buyId || !goods.includes(cur.buyId)) cur.buyId = goods[0];
     const rows = goods.map((id) => {
       const d = itemDef(id, bal);
-      return `<button type="button" class="row-item ${cur.buyId === id ? 'on' : ''}" data-act="pick" data-id="${id}">${icon(id)}<span>${d.name}</span><em>${won(d.price)}원</em></button>`;
+      return `<button type="button" class="row-item ${cur.buyId === id ? 'on' : ''}" data-act="pick" data-id="${id}">${icon(id)}<span>${d.name}${cmpMark(s, id)}</span><em>${won(d.price)}원</em></button>`;
     }).join('');
     const d = itemDef(cur.buyId, bal), max = inv.maxBuy(s, cur.buyId, bal);
     const stack = d.kind === 'consumable';
     const qty = stack ? Math.min(cur.qty, Math.max(1, max)) : 1;
-    const side = `<div class="detail">${icon(d.id, 'big')}<h3>${d.name}</h3><p>${itemInfo({ id: d.id, enchant: 0 })}</p>
+    const side = `<div class="detail">${icon(d.id, 'big')}<h3>${d.name}</h3><p>${itemInfo({ id: d.id, enchant: 0 })}</p>${cmpLine(s, d.id, 0)}
       ${stack ? qtyBox(Math.max(1, max)) : ''}
       <p class="sum">${won(qty)}개 · <b>${won(d.price * qty)}원</b></p>
       <div class="btns"><button type="button" class="act primary" data-act="buy" ${max < 1 ? 'disabled' : ''}>사기</button></div>
@@ -321,7 +393,7 @@ export function initWindows() {
   $('winTabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act="tab"]');
     if (!b || !cur || cur.busy) return;
-    cur.tab = b.dataset.tab; cur.sel = null; cur.qty = 1; cur.confirm = null; cur.fx = null; msg('');
+    cur.tab = b.dataset.tab; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; msg('');
     render();
   });
   $('winClose').addEventListener('click', close);
@@ -332,30 +404,33 @@ export function initWindows() {
     const s = G.save;
     switch (a) {
       case 'sel':
-        cur.sel = { where: d.where, uid: Number(d.uid) }; cur.qty = 1; cur.confirm = null; cur.fx = null; msg(''); break;
-      case 'pick': cur.buyId = d.id; cur.qty = 1; msg(''); break;
-      case 'qty': cur.qty = Math.max(1, cur.qty + Number(d.d)); break;
-      case 'qtyset': cur.qty = Math.max(1, Number(d.v)); break;
+        cur.sel = { where: d.where, uid: Number(d.uid) }; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; msg(''); break;
+      case 'pick': cur.buyId = d.id; cur.qty = 1; cur.qtyFresh = true; msg(''); break;
+      case 'qty': cur.qty = Math.max(1, cur.qty + Number(d.d)); cur.qtyFresh = false; break;
+      case 'qtyset': cur.qty = Math.max(1, Number(d.v)); cur.qtyFresh = false; break;
+      // 6차: [+10]·[+100] — 고른 직후(1개 상태)에는 그 수로, 그 뒤로는 누를 때마다 더한다(10 세 번 = 30). 화면에서 최대까지로 자름
+      case 'qtyadd': cur.qty = Math.max(1, (cur.qtyFresh ? 0 : cur.qty) + Number(d.v)); cur.qtyFresh = false; break;
+      case 'qtyone': cur.qty = 1; cur.qtyFresh = true; break;
       case 'equip': deal(inv.equip(s, cur.sel.uid, bal), 'equip', { okText: '장착했습니다' }); return;
       case 'unequip': deal(inv.unequip(s, itemDef(selected(s).id, bal).kind, bal), 'unequip', { okText: '벗었습니다' }); return;
       case 'goEnchant': cur.tab = 'enchant'; cur.confirm = null; cur.fx = null; break;
       case 'buy': {
         const id = cur.buyId, d2 = itemDef(id, bal);
         const n = d2.kind === 'consumable' ? Math.min(cur.qty, inv.maxBuy(s, id, bal)) : 1;
-        deal(inv.buy(s, id, n, bal), 'buy', { okText: `${d2.name} ${won(n)}개를 샀습니다 (−${won(d2.price * n)}원)` });
+        deal(inv.buy(s, id, n, bal), 'buy', { okText: `${d2.name} ${won(n)}개를 샀습니다 (−${won(d2.price * n)}원)`, after: () => { if (cur) { cur.qty = 1; cur.qtyFresh = true; } } });
         return;
       }
       case 'sell': {
         const it = selected(s); if (!it) return;
         const n = Math.min(cur.qty, it.count), gold = inv.sellPrice(it.id, bal) * n, name = itemName(it);
-        deal(inv.sell(s, it.uid, n, bal), 'sell', { okText: `${name} ${won(n)}개를 팔았습니다 (+${won(gold)}원)`, after: () => { cur.sel = null; cur.qty = 1; } });
+        deal(inv.sell(s, it.uid, n, bal), 'sell', { okText: `${name} ${won(n)}개를 팔았습니다 (+${won(gold)}원)`, after: () => { if (cur) { cur.sel = null; cur.qty = 1; cur.qtyFresh = true; } } });
         return;
       }
       case 'deposit': case 'withdraw': {
         const it = selected(s); if (!it) return;
         const n = Math.min(cur.qty, it.count), name = itemName(it);
         const fn = a === 'deposit' ? inv.toWarehouse : inv.toBag;
-        deal(fn(s, it.uid, n, bal), a, { okText: `${name} ${won(n)}개를 ${a === 'deposit' ? '맡겼습니다' : '찾았습니다'}`, after: () => { cur.sel = null; cur.qty = 1; } });
+        deal(fn(s, it.uid, n, bal), a, { okText: `${name} ${won(n)}개를 ${a === 'deposit' ? '맡겼습니다' : '찾았습니다'}`, after: () => { if (cur) { cur.sel = null; cur.qty = 1; cur.qtyFresh = true; } } });
         return;
       }
       case 'askEnchant': {
