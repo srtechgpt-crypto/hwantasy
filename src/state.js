@@ -66,18 +66,28 @@ export const hud = {
     el.hidden = base;
     if (el.textContent !== text) el.textContent = text;
   },
-  // 5차 스킬 버튼: 못 배움=자물쇠+Lv, 쿨타임=어두운 부채꼴+남은 초, 아머 켜짐=빛남
-  setSkills(list) {
+  // 9차 단축 칸(6칸): 빈 칸=점선 +, 스킬=그림·이름·쿨타임 부채꼴·남은 초, 물약·귀환=개수(없으면 흐림), 켜진 버프=빛남
+  setHotbar(list, page) {
+    const no = $('hbPageNo');
+    if (no && no.textContent !== String(page + 1)) no.textContent = String(page + 1);
     for (const k of list) {
-      const b = $(`btnSkill_${k.id}`);
+      const b = $(`hb${k.i}`);
       if (!b) continue;
-      const cd = k.learned && k.left > 0 ? k.left / k.total : 0;
-      b.classList.toggle('locked', !k.learned);
+      const img = b.querySelector('img'), src = k.empty ? '' : `assets/icons/${k.icon}.png`;
+      if (b.dataset.src !== src) { b.dataset.src = src; if (src) img.src = src; else img.removeAttribute('src'); }
+      b.classList.toggle('empty', !!k.empty);
+      b.classList.toggle('item', k.kind === 'item');
+      b.classList.toggle('none', k.kind === 'item' && k.count <= 0);
+      b.classList.toggle('ult', k.id === 'ult');
       b.classList.toggle('active', !!k.active);
+      b.classList.toggle('casting', !!k.casting);
+      const cd = k.left > 0 && k.total > 0 ? Math.min(1, k.left / k.total) : 0;
       b.style.setProperty('--cd', cd.toFixed(3));
-      const label = !k.learned ? `Lv${k.level}` : k.left > 0 ? `${Math.ceil(k.left / 1000)}` : '';
-      const t = b.querySelector('small');
-      if (t.textContent !== label) t.textContent = label;
+      const set = (sel, text) => { const t = b.querySelector(sel); if (t.textContent !== text) t.textContent = text; };
+      set('b', k.empty ? '' : k.label);
+      set('small', k.left > 0 ? String(Math.ceil(k.left / 1000)) : '');
+      set('i', k.kind === 'item' ? String(Math.min(999, k.count)) : '');
+      b.setAttribute('aria-label', k.empty ? `빈 단축 칸 ${k.i + 1}` : `${k.name} (${k.i + 1})`);
     }
   },
   setAuto(on) {

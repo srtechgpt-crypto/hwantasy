@@ -10,7 +10,9 @@ import * as inv from '../domain/inventory.js';
 import { bossRemainMs, bossReady, normalizeBossTime } from '../domain/boss.js';
 import { decideAuto } from '../domain/autohunt.js';
 import { findPath } from '../domain/path.js';
-import { learnedSkills, skillDef } from '../domain/skills.js';
+import { learnedSkills, skillDef, incomingReduce, counterDamage } from '../domain/skills.js';
+import { placeLearned, autoUse, PAGE_SIZE } from '../domain/hotbar.js';
+import { createSkillFx } from '../ui/skillfx.js';
 import { compareGear } from '../domain/compare.js';
 import { statsOf } from '../domain/save.js';
 import { createJoystick } from '../ui/joystick.js';
@@ -35,7 +37,11 @@ const PATH_MS = 500;          // 5차: 길을 다시 구하는 간격(목표 칸
 const UNREACH_MS = 20000;     // 5차: 길이 없는 몬스터는 이 시간 동안 자동 사냥에서 뺀다
 const ROAM_MS = 8000;         // 5차: 돌아다니기 목표 하나에 쓰는 최대 시간
 const NUDGE = 6;              // 5차: 조이스틱이 모서리에 걸리면 옆으로 이만큼(px) 안에 빈 곳을 찾아 미끄러진다
-const SKILL_IDS = ['bash', 'stun', 'whirl', 'guard'];
+// 9차: 단축 칸 물건 짧은 이름, 방어 스킬 글자 색, 8방향 → 각도(대지 가르기 방향)
+const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', returnScroll: '귀환' };
+const DEF_COLOR = { block: '#9fd8ff', heal: '#7dff9a', guard: '#9fd8ff', counter: '#ff7a6a' };
+const FACE_ANGLE = { right: 0, downRight: Math.PI / 4, down: Math.PI / 2, downLeft: (3 * Math.PI) / 4, left: Math.PI, upLeft: (-3 * Math.PI) / 4, up: -Math.PI / 2, upRight: -Math.PI / 4 };
+const MAX_FLOATS = 30; // ⑤ #19: 떠오르는 글자 상한
 const DIRS = ['down', 'up', 'left', 'right'];
 const MON_KEYS = {
   jelly: 'm_jelly', mouse: 'm_mouse', hopfrog: 'm_hopfrog', goblin: 'm_goblin',
@@ -83,6 +89,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.spritesheet('hero', 'assets/hero.png', { frameWidth: HERO_FRAME, frameHeight: HERO_FRAME });
     this.load.image('sword', 'assets/sword.png');
     this.load.image('coin', 'assets/coin.png');
+    this.load.image('ult_sword', 'assets/ult_sword.png'); // 9차 성검 강림(PixelLab)
     this.load.spritesheet('fx_return', 'assets/fx_return.png', { frameWidth: 32, frameHeight: 32 });
     for (const [id, key] of Object.entries(MON_KEYS)) { const f = MON_FRAME[id] ?? 16; this.load.spritesheet(key, `assets/${key}.png`, { frameWidth: f, frameHeight: f }); }
     for (const n of NPCS) this.load.spritesheet(`npc_${n.id}`, `assets/npc_${n.id}.png`, { frameWidth: 16, frameHeight: 16 });
@@ -144,6 +151,14 @@ export class WorldScene extends Phaser.Scene {
     this.skillAt = {};
     this.guardUntil = 0;
     this.queuedSkill = null;
+    // 9차: 막기·반격 끝 시각, 필살기 시전 상태(시전 세대 번호가 바뀌면 취소), 버프 표시, 떠오르는 글자
+    this.blockUntil = 0;
+    this.counterUntil = 0;
+    this.casting = null;
+    this.castGen = 0;
+    this.floats = [];
+    this.buffG = this.add.graphics().setDepth(11);
+    this.fx = createSkillFx(this);
     this.autoArea = null;
     this.route = null;
     this.roamGoal = null;
@@ -277,6 +292,7 @@ export class WorldScene extends Phaser.Scene {
 
   refreshZoomButtons() {
     for (const [id, v] of [['zoomFar', -1], ['zoomMid', 0], ['zoomNear', 1]]) document.getElementById(id)?.classList.toggle('on', this.prefs.zoom === v);
+    for (const [id, v] of [['calmOff', false], ['calmOn', true]]) document.getElementById(id)?.classList.toggle('on', !!this.prefs.calm === v);
   }
 
   // 화면 끊김 방지: Phaser의 roundPixels는 카메라 위치를 그림 1칸(=화면 3픽셀) 단위로 내려서
@@ -326,7 +342,9 @@ export class WorldScene extends Phaser.Scene {
     this.setAuto(false);
     this.cancelSlam();
     // 5차: 다른 기록으로 들어오면 앞 캐릭터의 쿨타임·아머·못 가는 목록을 물려받지 않게
-    this.skillAt = {}; this.guardUntil = 0; this.guardRing?.destroy(); this.guardRing = null; this.unreach.clear();
+    this.cancelCasting(this.casting, false); this.castGen++;
+    this.skillAt = {}; this.guardUntil = 0; this.blockUntil = 0; this.counterUntil = 0; this.buffG.clear(); this.unreach.clear();
+    this.syncHotbar(true); // 9차: v4에서 넘어왔거나 배웠는데 칸에 없는 스킬
     this.invulnUntil = this.gt + 3000;
     this.clearMonsters();
     this.spawnAll();
@@ -337,7 +355,7 @@ export class WorldScene extends Phaser.Scene {
     this.refreshSkills(true);
   }
 
-  leaveGame() { this.playing = false; this.setAuto(false); this.releaseInput(); }
+  leaveGame() { this.playing = false; this.setAuto(false); this.releaseInput(); this.cancelCasting(this.casting, false); this.castGen++; }
 
   // 창이 열릴 때: 조이스틱과 눌린 공격 버튼을 놓는다
   releaseInput() { this.joy?.reset(); this.attackHeld = false; this.queuedSkill = null; }
@@ -355,6 +373,7 @@ export class WorldScene extends Phaser.Scene {
     this.releaseInput();
     this.cancelSlam();
     this.cancelSwing();
+    this.cancelCasting(); this.castGen++;
     this.returnBurst(this.knight.x, this.knight.y, false);
     this.knight.x = G.save.player.x; this.knight.y = G.save.player.y;
     this.drawHero();
@@ -391,8 +410,19 @@ export class WorldScene extends Phaser.Scene {
       document.getElementById(id)?.addEventListener('click', () => this.setZoomPref(v));
     }
     on('btnReturn', () => this.useReturn('직접'));
-    // 5차 스킬 버튼
-    for (const id of SKILL_IDS) on(`btnSkill_${id}`, () => this.useSkill(id, null, true));
+    // 9차 단축 칸 6개 + 쪽 넘기기, PC 키보드(1~6·Tab), 메뉴의 흔들림 줄이기
+    for (let i = 0; i < PAGE_SIZE; i++) on(`hb${i}`, () => this.useSlot(i));
+    on('hbPage', () => this.flipPage());
+    window.addEventListener('keydown', (e) => {
+      if (!this.canAct() || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return; // 창·메뉴가 열려 있으면 게임 키를 쓰지 않음
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.key >= '1' && e.key <= String(PAGE_SIZE)) { e.preventDefault(); this.useSlot(Number(e.key) - 1); }
+      else if (e.key === 'Tab') { e.preventDefault(); this.flipPage(); }
+    });
+    for (const [id, v] of [['calmOff', false], ['calmOn', true]]) {
+      document.getElementById(id)?.addEventListener('click', () => { this.prefs.calm = v; savePrefs(this.prefs); this.refreshZoomButtons(); });
+    }
     on('btnAuto', () => {
       if (G.auto) { this.setAuto(false); return; }
       if (mapIdAt(this.knight.x) === 'town') { hud.toast('자동 사냥은 사냥터에서 켜 주세요'); return; }
@@ -527,6 +557,8 @@ export class WorldScene extends Phaser.Scene {
     this.updateMonsters(dt, now);
     if (G.pending) return;
     this.updateSlam(now);
+    this.updateCasting();
+    if (G.pending) return;
     this.updateSkillFx(now);
     this.updateGroundItems(now);
     this.updateTalk();
@@ -625,7 +657,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   tryAttack(target) {
-    if (this.attackCd > 0) return false;
+    if (this.attackCd > 0 || this.casting) return false;
     const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
     if (!m) return false;
     this.attackCd = this.stats().attackMs / 1000;
@@ -644,69 +676,197 @@ export class WorldScene extends Phaser.Scene {
     m.hp -= r.dmg;
     m.hurtAt = this.gt;
     if (!m.def.isBoss) this.knockback(m); else this.flashWhite(m);
-    this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(r.dmg), color);
+    // 9차: 치명타는 큰 빨간 글자
+    if (r.crit) this.fx.crit(m.sprite.x, m.sprite.y - (m.def.isBoss ? 16 : 0), r.dmg);
+    else this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(r.dmg), color);
     if (m.hp <= 0) (m.def.isBoss ? this.killBoss(m) : this.killMonster(m));
     return r;
   }
 
-  // ---------- 5차 스킬 ----------
+  // ---------- 스킬(5차 → 9차: 액티브 10개·단축 칸) ----------
   // 남은 쿨타임(ms, 0이면 준비됨)
   skillLeft(id) { return Math.max(0, (this.skillAt[id] ?? 0) - this.gt); }
+  buffOn(id) { return { guard: this.gt < this.guardUntil, block: this.gt < this.blockUntil, counter: this.gt < this.counterUntil }[id] ?? false; }
 
-  // manual: 버튼으로 눌렀을 때만 안내 문구. 공격 스킬은 일반 공격 한 번을 대신한다(공격 대기 중이면 버튼은 예약)
+  // 공통 입구(⑤ #17): 단축 칸·키보드·예약·자동 사냥 모두 여기로. manual = 손으로 눌렀을 때만 안내 문구.
+  // 공격 스킬은 일반 공격 한 번을 대신한다(공격 대기 중이면 손으로 누른 것은 예약). 방어 스킬은 공격 차례와 무관(⑤ #10)
   useSkill(id, target, manual) {
     if (!this.canAct()) return false;
     const def = skillDef(id, bal), lv = G.save.player.level;
     if (lv < def.level) { if (manual) hud.toast(`${def.name}은(는) Lv ${def.level}에 배웁니다`); return false; }
+    if (this.casting) { if (manual) hud.toast('필살기를 쓰는 중입니다'); return false; }
     if (this.skillLeft(id) > 0) { if (manual) hud.toast(`${def.name} 준비 중 (${Math.ceil(this.skillLeft(id) / 1000)}초)`); return false; }
-    if (id === 'guard') {
-      this.skillAt.guard = this.gt + def.cooldownMs;
-      this.guardUntil = this.gt + def.durationMs;
-      this.guardFx();
-      this.floatText(this.knight.x, this.knight.y - 24, def.name, '#9fd8ff', 1100);
-      this.refreshSkills(true);
-      return true;
-    }
+    if (!def.usesAttack) return this.useDefense(def, manual);
+    if (mapIdAt(this.knight.x) === 'town') { if (manual) hud.toast('마을에서는 공격 스킬을 쓸 수 없습니다'); return false; }
     if (this.attackCd > 0) { if (manual) this.queuedSkill = id; return false; }
-    if (id === 'whirl') {
-      const r = def.radiusTiles * TILE;
-      // 직접 누르면 둘레 모두, 자동 사냥은 이미 덤비는 몬스터(+지금 대상)만 — 가만히 있는 몬스터를 깨우지 않는다
-      const list = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (manual || m.aggro || m === target));
-      if (!list.length) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
-      this.skillAt.whirl = this.gt + def.cooldownMs;
-      this.attackCd = this.stats().attackMs / 1000;
-      this.swingAt(list[0]);
-      this.whirlFx(r);
-      const fixed = { stats: this.stats(), level: G.save.player.level };
-      for (const m of list) if (this.canHit(m)) this.strike(m, def.mult, '#9ff0ff', fixed);
-      this.refreshSkills(true);
-      return true;
-    }
-    const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
-    if (!m) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
-    this.skillAt[id] = this.gt + def.cooldownMs;
+    if (id === 'whirl') return this.skillWhirl(def, target, manual);
+    if (id === 'quake') return this.skillQuake(def, target, manual);
+    if (id === 'dash') return this.skillDash(def, target, manual);
+    if (id === 'ult') return this.skillUlt(def, target, manual);
+    return this.skillSingle(def, target, manual);
+  }
+
+  // 공격 스킬을 쓴 순간: 쿨타임 + 일반 공격 한 번만큼 기다림
+  spendAttack(def) {
+    this.skillAt[def.id] = this.gt + def.cooldownMs;
     this.attackCd = this.stats().attackMs / 1000;
-    this.swingAt(m, id === 'bash' ? 0xffa040 : 0xffe060);
-    this.floatText(this.knight.x, this.knight.y - 24, def.name, id === 'bash' ? '#ffb070' : '#ffe680', 900);
-    const r = this.strike(m, def.mult, id === 'bash' ? '#ffb070' : '#ffe680');
-    // 쇼크 스턴: 맞으면 기절(보스는 피해만)
-    if (id === 'stun' && r.hit && m.alive && !m.def.isBoss) { m.stunUntil = this.gt + def.stunMs; this.stunFx(m); }
     this.refreshSkills(true);
+  }
+  pickTarget(target, range) { return target && this.canHit(target) && this.dist(target) <= range ? target : this.nearestMonster(range); }
+  stunMon(m, ms) { m.stunUntil = Math.max(m.stunUntil ?? 0, this.gt + ms); this.stunFx(m); }
+
+  // 방어 스킬: 막기·회복·아머·반격(대상 필요 없음)
+  useDefense(def, manual) {
+    const p = G.save.player, st = this.stats(), x = this.knight.x, y = this.knight.y;
+    if (def.id === 'heal') {
+      if (p.hp >= st.maxHp) { if (manual) hud.toast('체력이 가득 찼습니다'); return false; }
+      const amount = Math.min(st.maxHp - p.hp, Math.floor((st.maxHp * def.healPct) / 100));
+      p.hp += amount;
+      this.fx.heal(x, y, amount);
+    } else {
+      const until = this.gt + def.durationMs;
+      if (def.id === 'guard') { this.guardUntil = until; this.fx.guardOn(x, y); }
+      if (def.id === 'block') { this.blockUntil = until; this.fx.blockOn(x, y); }
+      if (def.id === 'counter') { this.counterUntil = until; this.fx.counterOn(x, y); }
+      this.fx.title(x, y - 28, def.name, DEF_COLOR[def.id] ?? '#ffffff', 8, 1000);
+    }
+    this.skillAt[def.id] = this.gt + def.cooldownMs;
+    this.refreshSkills(true);
+    this.refreshHud(true);
     return true;
   }
 
-  guardFx() {
-    this.guardRing?.destroy();
-    this.guardRing = this.add.graphics().setDepth(11);
+  // 강타·쇼크 스턴: 한 마리
+  skillSingle(def, target, manual) {
+    const m = this.pickTarget(target, ATTACK_RANGE);
+    if (!m) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
+    this.spendAttack(def);
+    const bash = def.id === 'bash', color = bash ? '#ffb070' : '#ffe680';
+    const mx = m.sprite.x, my = m.sprite.y;
+    this.swingAt(m, bash ? 0xffa040 : 0xffe060);
+    this.fx.title(this.knight.x, this.knight.y - 28, def.name, color);
+    const r = this.strike(m, def.mult, color);
+    if (bash) this.fx.bash(mx, my - 6, this.facingLeft);
+    else { this.fx.stun(mx, my); if (r.hit && m.alive && !m.def.isBoss && def.stunMs) this.stunMon(m, def.stunMs); }
+    return true;
   }
 
-  whirlFx(r) {
+  // 회오리: 둘레 모두(직접 누르면 둘레 전부, 자동 사냥은 덤비는 몬스터 + 지금 대상만 — 가만히 있는 몬스터를 깨우지 않게)
+  skillWhirl(def, target, manual) {
+    const r = def.radiusTiles * TILE;
+    const list = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (manual || m.aggro || m === target));
+    if (!list.length) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
+    this.spendAttack(def);
+    this.swingAt(list[0]);
+    this.fx.whirl(this.knight.x, this.knight.y, r);
+    this.fx.title(this.knight.x, this.knight.y - 28, def.name, '#9ff0ff');
+    const fixed = { stats: this.stats(), level: G.save.player.level };
+    for (const m of list) if (this.canHit(m)) this.strike(m, def.mult, '#9ff0ff', fixed);
+    return true;
+  }
+
+  // 대지 가르기: 앞쪽 부채꼴(대상 쪽, 없으면 보는 쪽). 맞은 일반 몬스터는 느려짐
+  inCone(m, angle, r, arcDeg) {
+    const dx = m.sprite.x - this.knight.x, dy = m.sprite.y - this.knight.y, d = Math.hypot(dx, dy);
+    if (d - (m.reach || 0) > r) return false;
+    if (d < 8) return true;
+    let diff = Math.abs(Math.atan2(dy, dx) - angle);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    return diff <= (arcDeg * Math.PI) / 360;
+  }
+  quakeAngle(aim) { return aim ? Math.atan2(aim.sprite.y - this.knight.y, aim.sprite.x - this.knight.x) : FACE_ANGLE[this.dir8] ?? 0; }
+  skillQuake(def, target, manual) {
+    const r = def.radiusTiles * TILE;
+    const angle = this.quakeAngle(this.pickTarget(target, r));
+    const list = this.monsters.filter((m) => this.canHit(m) && (manual || m.aggro || m === target) && this.inCone(m, angle, r, def.arcDeg));
+    if (!list.length) { if (manual) hud.toast('앞쪽에 몬스터가 없습니다'); return false; }
+    this.spendAttack(def);
+    this.swingAt(list[0], 0xc08040);
+    this.fx.quake(this.knight.x, this.knight.y, angle, r, def.arcDeg);
+    this.fx.title(this.knight.x, this.knight.y - 28, def.name, '#ffc080');
+    const fixed = { stats: this.stats(), level: G.save.player.level };
+    for (const m of list) {
+      if (!this.canHit(m)) continue;
+      const res = this.strike(m, def.mult, '#ffc080', fixed);
+      if (res.hit && m.alive && !m.def.isBoss) { m.slowUntil = this.gt + def.slowMs; this.fx.slowMark(m); }
+    }
+    return true;
+  }
+
+  // 돌진 베기(⑤ #8): 착지 = 몬스터 앞. 출발→착지 직선을 2px마다 검사 — 막힌 칸, 보스 방 안/밖이 바뀜, 자동 사냥이면 사냥 지역 밖이면 취소(쿨타임 안 씀)
+  dashLanding(m) {
+    const x0 = this.knight.x, y0 = this.knight.y, dx = m.sprite.x - x0, dy = m.sprite.y - y0, d = Math.hypot(dx, dy) || 1;
+    const go = d - (m.reach || 0) - (ATTACK_RANGE - 6);
+    if (go < 1) return { x: x0, y: y0 };
+    const x1 = x0 + (dx / d) * go, y1 = y0 + (dy / d) * go;
+    const room0 = inBossRoom(x0, y0)?.id ?? null, area = G.auto ? (this.autoArea ?? mapIdAt(x0)) : null;
+    const n = Math.ceil(go / 2);
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n, y = y0 + ((y1 - y0) * i) / n;
+      if (this.blocked(x, y) || (inBossRoom(x, y)?.id ?? null) !== room0 || (area && mapIdAt(x) !== area)) return null;
+    }
+    return { x: x1, y: y1 };
+  }
+  skillDash(def, target, manual) {
+    const range = def.rangeTiles * TILE;
+    const m = this.pickTarget(target, range);
+    if (!m) { if (manual) hud.toast('돌진할 몬스터가 없습니다'); return false; }
+    const land = this.dashLanding(m);
+    if (!land) { if (manual) hud.toast('돌진할 길이 막혀 있습니다'); return false; }
+    this.spendAttack(def);
+    const x0 = this.knight.x, y0 = this.knight.y;
+    this.fx.dash(x0, y0, land.x, land.y, this.hero.frame.name);
+    this.knight.x = land.x; this.knight.y = land.y; this.route = null;
+    if (G.auto) this.autoCenter = { x: land.x, y: land.y };
+    this.swingAt(m, 0xffc070);
+    this.drawHero();
+    this.fx.title(this.knight.x, this.knight.y - 28, def.name, '#ffc070');
+    this.strike(m, def.mult, '#ffc070');
+    return true;
+  }
+
+  // 성검 강림(⑤ #16): 시전(castMs) 동안 칼이 떨어지고, 그 순간 다시 확인한 뒤 피해. 쿨타임·능력치·레벨은 시전 순간에 고정
+  skillUlt(def, target, manual) {
+    const r = def.radiusTiles * TILE;
+    const near = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (manual || m.aggro || m === target));
+    if (!near.length) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
     const x = this.knight.x, y = this.knight.y;
-    const g = this.add.graphics().setDepth(949);
-    const o = { k: 0 };
-    this.tweens.add({ targets: o, k: 1, duration: 320, ease: 'Cubic.easeOut',
-      onUpdate: () => { g.clear(); g.lineStyle(3, 0x9ff0ff, 0.9 * (1 - o.k)).strokeCircle(x, y - 4, r * (0.4 + 0.6 * o.k)); g.lineStyle(1, 0xffffff, 0.8 * (1 - o.k)).strokeCircle(x, y - 4, r * (0.3 + 0.6 * o.k)); },
-      onComplete: () => g.destroy() });
+    this.skillAt.ult = this.gt + def.cooldownMs;
+    this.attackCd = def.castMs / 1000 + this.stats().attackMs / 1000;
+    this.casting = { id: 'ult', at: this.gt + def.castMs, gen: this.castGen, map: mapIdAt(x), stats: this.stats(), level: G.save.player.level, manual, target: target?.uid ?? null };
+    this.casting.sword = this.fx.ultCast(x, y, def.castMs);
+    this.hero.setTint(0xffe9a0);
+    this.fx.title(x, y - 32, def.name, '#ffe070', 10, 900);
+    this.refreshSkills(true);
+    return true;
+  }
+  updateCasting() {
+    const c = this.casting;
+    if (!c || this.gt < c.at) return;
+    this.casting = null;
+    this.hero.clearTint();
+    const ok = c.gen === this.castGen && this.canAct() && G.save.player.hp > 0 && mapIdAt(this.knight.x) === c.map;
+    if (!ok) { this.cancelCasting(c, true); return; }
+    const def = skillDef('ult', bal), r = def.radiusTiles * TILE;
+    this.fx.ultImpact(this.knight.x, this.knight.y, r, c.sword);
+    const fixed = { stats: c.stats, level: c.level };
+    const list = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (c.manual || m.aggro || m.uid === c.target));
+    for (const m of list) {
+      if (!this.canHit(m)) continue;
+      const res = this.strike(m, def.mult, '#ffe070', fixed);
+      if (res.hit && m.alive && !m.def.isBoss) this.stunMon(m, def.stunMs);
+      if (G.pending) return;
+    }
+    this.refreshSkills(true);
+  }
+  // 귀환·죽음·순간이동·다시 시작 때: 시전 취소(refund면 쿨타임을 돌려줌), 칼 그림 정리
+  cancelCasting(c = this.casting, refund = true) {
+    if (!c) return;
+    if (c === this.casting) this.casting = null;
+    if (refund) { this.skillAt.ult = 0; this.attackCd = 0; }
+    if (c.sword) { this.tweens.killTweensOf(c.sword); c.sword.destroy(); }
+    this.hero?.clearTint();
+    if (G.save && this.playing) this.refreshSkills(true);
   }
 
   stunFx(m) {
@@ -714,27 +874,89 @@ export class WorldScene extends Phaser.Scene {
     m.stunText?.destroy(); m.stunText = t;
   }
 
-  // 매 프레임: 아머 테두리·기절 글자 따라 붙이기
+  // 매 프레임: 켜진 방어 스킬 표시(아머 = 푸른 고리, 막기 = 앞쪽 방패, 반격 = 붉은 기운). 끝나기 3초 전부터 깜빡임
   updateSkillFx(now) {
-    if (this.guardRing) {
-      if (now >= this.guardUntil) { this.guardRing.destroy(); this.guardRing = null; }
-      else {
-        const left = this.guardUntil - now, blink = left < 3000 && Math.floor(now / 150) % 2;
-        this.guardRing.clear().lineStyle(1, 0x7fc8ff, blink ? 0.3 : 0.85).strokeEllipse(this.snap(this.knight.x), this.snap(this.knight.y - 1), 22, 9)
-          .lineStyle(1, 0xcfeaff, blink ? 0.15 : 0.5).strokeEllipse(this.snap(this.knight.x), this.snap(this.knight.y - 12), 26, 30);
-      }
+    const g = this.buffG;
+    g.clear();
+    const x = this.snap(this.knight.x), y = this.snap(this.knight.y);
+    const blink = (until) => until - now < 3000 && Math.floor(now / 150) % 2;
+    if (now < this.guardUntil) {
+      const b = blink(this.guardUntil);
+      g.lineStyle(1, 0x7fc8ff, b ? 0.3 : 0.85).strokeEllipse(x, y - 1, 22, 9)
+        .lineStyle(1, 0xcfeaff, b ? 0.15 : 0.5).strokeEllipse(x, y - 12, 26, 30);
+    }
+    if (now < this.blockUntil) {
+      const b = blink(this.blockUntil), a = FACE_ANGLE[this.dir8] ?? Math.PI / 2;
+      const sx = x + Math.cos(a) * 9, sy = y - 9 + Math.sin(a) * 6;
+      g.fillStyle(0x9fd8ff, b ? 0.12 : 0.3).fillEllipse(sx, sy, 9, 13).lineStyle(1, 0xe0f4ff, b ? 0.3 : 0.9).strokeEllipse(sx, sy, 9, 13);
+    }
+    if (now < this.counterUntil) {
+      const b = blink(this.counterUntil), pulse = 2 * Math.sin(now / 120);
+      g.lineStyle(1, 0xff5040, b ? 0.25 : 0.75).strokeEllipse(x, y - 10, 24 + pulse, 30 + pulse);
     }
   }
 
+  // 9차 단축 칸: 지금 쪽 6칸을 그린다(0.1초마다, 바뀌면 바로)
   refreshSkills(force) {
     const now = performance.now();
     if (!force && now - (this.skillHudAt || 0) < 100) return;
     this.skillHudAt = now;
-    const lv = G.save.player.level;
-    hud.setSkills(SKILL_IDS.map((id) => {
-      const d = skillDef(id, bal);
-      return { id, name: d.name, level: d.level, learned: lv >= d.level, left: this.skillLeft(id), total: d.cooldownMs, active: id === 'guard' && this.gt < this.guardUntil };
-    }));
+    const s = G.save, page = this.prefs.page ?? 0;
+    const list = [];
+    for (let i = 0; i < PAGE_SIZE; i++) {
+      const e = s.hotbar?.slots[page * PAGE_SIZE + i];
+      if (!e) { list.push({ i, empty: true }); continue; }
+      if (e.t === 'skill') {
+        const d = skillDef(e.id, bal);
+        list.push({ i, kind: 'skill', id: e.id, name: d.name, icon: `sk_${e.id}`, label: d.short, left: this.skillLeft(e.id), total: d.cooldownMs, active: this.buffOn(e.id), casting: this.casting?.id === e.id });
+      } else {
+        const pd = bal.consumables.find((c) => c.id === e.id);
+        const potion = e.id !== 'returnScroll';
+        list.push({ i, kind: 'item', id: e.id, name: pd?.name ?? e.id, icon: e.id, label: ITEM_SHORT[e.id] ?? '', count: countOf(s, e.id),
+          left: potion ? this.potionCd * 1000 : 0, total: potion ? this.potionCdTotal || pd?.cooldownMs || 1000 : 0 });
+      }
+    }
+    hud.setHotbar(list, page);
+  }
+
+  // 단축 칸 누르기(키보드 1~6도): 빈 칸이면 [정보]→[스킬] 창
+  useSlot(i) {
+    if (!this.canAct()) return;
+    const e = G.save.hotbar?.slots[(this.prefs.page ?? 0) * PAGE_SIZE + i];
+    if (!e) { G.ui.open('me', { tab: 'skill' }); return; }
+    if (e.t === 'skill') this.useSkill(e.id, null, true);
+    else if (e.id === 'returnScroll') this.useReturn('직접');
+    else this.drinkPotion(true, e.id);
+  }
+  flipPage() {
+    this.prefs.page = (this.prefs.page ?? 0) === 0 ? 1 : 0;
+    savePrefs(this.prefs);
+    this.queuedSkill = null; // ⑤ #17: 쪽이 바뀌면 예약 취소
+    this.refreshSkills(true);
+  }
+  // 새로 배운 스킬을 빈 칸에(손으로 지운 것은 다시 안 넣음). 칸이 없으면 안내
+  syncHotbar(quiet = false) {
+    const s = G.save;
+    if (!s?.hotbar) return;
+    const r = placeLearned(s.hotbar, s.player.level, bal);
+    if (!r.placed.length && !r.full.length) return;
+    s.hotbar = r.hotbar;
+    if (!quiet) for (const id of r.placed) hud.log(`<span style="color:#ffe08a">새 스킬 <b>${skillDef(id, bal).name}</b> — 단축 칸에 넣었습니다</span>`);
+    if (r.full.length) {
+      const names = r.full.map((id) => skillDef(id, bal).name).join(', ');
+      hud.log(`<span style="color:#9fd8ff">새 스킬 ${names} — 단축 칸이 가득 찼습니다. [정보]→[스킬]에서 넣어 주세요</span>`);
+      if (!quiet) this.time.delayedCall(1400, () => hud.toast('단축 칸이 가득 찼습니다 — [정보]→[스킬]에서 새 스킬을 넣어 주세요', 3200));
+    }
+    this.refreshSkills(true);
+  }
+
+  // 반격의 기운(⑤ #3): 맞았고 안 막혔고 피해가 있을 때만, 기사가 살아 있을 때. 반격 처치는 일반 처치 경로
+  counterHit(m, r) {
+    const dmg = counterDamage(r, bal);
+    if (!dmg || !this.canHit(m)) return;
+    m.hp -= dmg; m.hurtAt = this.gt; m.aggro = true;
+    this.fx.countered(m.sprite.x, m.sprite.y, dmg);
+    if (m.hp <= 0) (m.def.isBoss ? this.killBoss(m) : this.killMonster(m));
   }
 
   killMonster(m) {
@@ -792,6 +1014,7 @@ export class WorldScene extends Phaser.Scene {
 
   levelUpFx(level) {
     G.save.player.hp = this.stats().maxHp;
+    this.syncHotbar(); // 9차: 새 스킬을 단축 칸에(이어지는 levelup 저장에 함께 들어감)
     const fx = this.add.sprite(this.knight.x, this.knight.y - 6, 'fx_levelup').setDepth(960);
     fx.play('fx_levelup'); fx.once('animationcomplete', () => fx.destroy());
     this.floatText(this.knight.x, this.knight.y - 22, 'LEVEL UP!', '#e0a63e', 1600);
@@ -901,17 +1124,18 @@ export class WorldScene extends Phaser.Scene {
     if (this.autoItem === g.uid) this.autoItem = null;
   }
 
-  drinkPotion(manual) {
+  // 9차: id를 주면 그 물약(단축 칸), 없으면 모자란 만큼에 맞는 물약
+  drinkPotion(manual, id = null) {
     const s = G.save, st = this.stats();
     if (this.potionCd > 0) return false;
-    if (inv.potionCount(s, bal) <= 0) { if (manual) hud.toast('물약이 없습니다'); return false; }
+    if (id ? countOf(s, id) <= 0 : inv.potionCount(s, bal) <= 0) { if (manual) hud.toast(id ? `${nameOf(id)}이 없습니다` : '물약이 없습니다'); return false; }
     if (s.player.hp >= st.maxHp) { if (manual) hud.toast('체력이 가득 찼습니다'); return false; }
-    const res = inv.usePotion(s, bal);
+    const res = inv.usePotion(s, bal, id);
     if (!res.ok) { if (manual) hud.toast(res.reason); return false; }
     G.save = res.save;
     const healed = res.healed ?? 0;
     const pd = bal.consumables.find((c) => c.id === res.id);
-    this.potionCd = pd.cooldownMs / 1000;
+    this.potionCd = pd.cooldownMs / 1000; this.potionCdTotal = pd.cooldownMs;
     this.potionFx(pd.id);
     this.floatText(this.knight.x, this.knight.y - 18, `+${Math.round(healed)}`, '#7fd36a');
     return true;
@@ -942,6 +1166,7 @@ export class WorldScene extends Phaser.Scene {
   teleportTown(effect = true) {
     this.setAuto(false);
     this.queuedSkill = null;
+    this.cancelCasting(); this.castGen++; // ⑤ #16: 시전 중이던 필살기 취소(쿨타임 돌려줌)
     this.cancelSwing();
     this.cancelSlam();
     if (effect) this.returnBurst(this.knight.x, this.knight.y, false);
@@ -961,7 +1186,8 @@ export class WorldScene extends Phaser.Scene {
     if (p.hp < st.maxHp) p.hp = Math.min(st.maxHp, p.hp + st.regenPerTick);
   }
 
-  guardReduce(now) { return now < this.guardUntil ? skillDef('guard', bal).reduce : 0; }
+  // 9차(⑤ #2): 받는 피해 감소 = 아머 + 불굴(맞기 직전 체력 기준), 상한 있음
+  incomingReduce(now) { const st = this.stats(); return incomingReduce({ guardOn: now < this.guardUntil, hp: Math.max(0, G.save.player.hp), maxHp: st.maxHp }, st, bal); }
 
   hurtPlayer(dmg, color = '#ff6b5e') {
     const p = G.save.player;
@@ -969,7 +1195,8 @@ export class WorldScene extends Phaser.Scene {
     this.hero.setTint(0xff7766);
     this.time.delayedCall(120, () => this.hero.clearTint());
     this.floatText(this.knight.x, this.knight.y - 16, String(dmg), color);
-    if (p.hp <= 0) this.die();
+    if (p.hp <= 0) { this.die(); return true; }
+    return false;
   }
 
   die() {
@@ -1008,14 +1235,15 @@ export class WorldScene extends Phaser.Scene {
       // 5차: 같은 지역에서 찾아가기·스킬
       huntArea: this.autoArea ?? mapIdAt(this.knight.x),
       skipIds: [...this.unreach].filter(([, until]) => until > this.gt).map(([id]) => id),
-      skills: learnedSkills(s.player.level, bal).map((id) => ({ id, ready: this.skillLeft(id) <= 0 })),
-      // 회오리·아머 판단용: 이미 나에게 덤비는(aggro) 몬스터만 센다 — 가만히 있는 몬스터(성터 등)를 회오리로 끌어들이지 않게
-      nearCount: this.monsters.filter((m) => m.aggro && this.canHit(m) && this.dist(m) <= skillDef('whirl', bal).radiusTiles * TILE).length,
+      // 9차: '자동 사용'을 끈 스킬은 넘기지 않는다. 시전 중이면 아무 스킬도 준비 안 됨
+      skills: learnedSkills(s.player.level, bal).filter((id) => autoUse(s.hotbar, id)).map((id) => ({ id, ready: !this.casting && this.skillLeft(id) <= 0 })),
+      ...this.autoCounts(),
       stuckSec: this.stuck.id === this.autoTarget ? this.stuck.sec : 0,
       items: this.groundItems.filter((g) => g.skipUntil <= this.gt && this.canAccept(g) && mapIdAt(g.x) === (this.autoArea ?? mapIdAt(this.knight.x)) && !inBossRoom(g.x, g.y))
         .map((g) => ({ id: g.uid, x: g.x, y: g.y })),
       itemId: this.autoItem,
     };
+    this.autoCtx = ctx; // 시험·문제 확인용(마지막으로 판단에 쓴 정보)
     const a = decideAuto(ctx, bal);
     const tgt = a.targetId ? this.monsters.find((m) => m.uid === a.targetId) : null;
     if (a.action !== 'roam') this.roamGoal = null;
@@ -1048,15 +1276,20 @@ export class WorldScene extends Phaser.Scene {
           return this.chase(tgt, dt);
         }
         return false;
-      case 'skill':
-        // 아머는 공격과 따로, 공격 스킬은 일반 공격 한 번을 대신(못 쓰면 일반 공격)
-        if (tgt) {
-          this.autoCenter = { x: this.knight.x, y: this.knight.y };
-          const used = this.useSkill(a.skillId, tgt, false) || (a.skillId !== 'guard' && this.tryAttack(tgt));
-          if (used) { if (a.skillId !== 'guard') this.stuck = { id: tgt.uid, best: Infinity, sec: 0 }; return false; }
-          if (a.skillId !== 'guard') { this.trackStuck(tgt, dt); return this.chase(tgt, dt); }
+      case 'skill': {
+        // 9차(⑤ #10): 방어·회복은 정의대로 대상·공격 차례와 무관. 공격 스킬은 일반 공격 한 번을 대신(못 쓰면 일반 공격),
+        // 돌진은 못 하면(길 막힘) 걸어서 쫓는다
+        const def = skillDef(a.skillId, bal);
+        if (!def.usesAttack) { this.useSkill(a.skillId, tgt, false); return false; }
+        if (!tgt) return false;
+        if (a.skillId === 'dash') {
+          if (this.useSkill('dash', tgt, false)) { this.stuck = { id: tgt.uid, best: Infinity, sec: 0 }; return true; }
+          this.trackStuck(tgt, dt); return this.chase(tgt, dt);
         }
-        return false;
+        this.autoCenter = { x: this.knight.x, y: this.knight.y };
+        if (this.useSkill(a.skillId, tgt, false) || this.tryAttack(tgt)) { this.stuck = { id: tgt.uid, best: Infinity, sec: 0 }; return false; }
+        this.trackStuck(tgt, dt); return this.chase(tgt, dt);
+      }
       case 'roam': return this.roam(dt);
       case 'move': {
         const x = tgt ? tgt.sprite.x : a.x, y = tgt ? tgt.sprite.y : a.y;
@@ -1066,6 +1299,24 @@ export class WorldScene extends Phaser.Scene {
       }
       default: return false;
     }
+  }
+
+  // 9차(⑤ #11): 자동 사냥 판단용 수 — threat = 덤비고·안 기절·3칸 안, hits = 스킬별로 실제 맞을 수(덤비는 몬스터 + 지금 대상만),
+  // ultStrong = 필살기에 맞을 것 중 체력 넉넉한 수, nearCount = 옛 회오리 판단(호환)
+  autoCounts() {
+    const tgt = this.monsters.find((m) => m.uid === this.autoTarget && this.canHit(m));
+    const mine = (m) => this.canHit(m) && (m.aggro || m === tgt);
+    const R = (id) => skillDef(id, bal).radiusTiles * TILE;
+    const whirl = this.monsters.filter((m) => mine(m) && this.dist(m) <= R('whirl')).length;
+    const q = skillDef('quake', bal), angle = this.quakeAngle(tgt);
+    const quake = this.monsters.filter((m) => mine(m) && this.inCone(m, angle, R('quake'), q.arcDeg)).length;
+    const ultList = this.monsters.filter((m) => mine(m) && this.dist(m) <= R('ult'));
+    return {
+      threat: this.monsters.filter((m) => m.aggro && this.canHit(m) && this.gt >= (m.stunUntil ?? 0) && this.dist(m) <= 3 * TILE).length,
+      hits: { whirl, quake, ult: ultList.length },
+      ultStrong: ultList.filter((m) => m.hp / m.def.hp >= bal.autohunt.ultStrongRatio).length,
+      nearCount: whirl,
+    };
   }
 
   stopAuto(reason) {
@@ -1199,7 +1450,10 @@ export class WorldScene extends Phaser.Scene {
         continue;
       }
       if (m.asleep) { m.asleep = false; m.sprite.setVisible(true); m.sprite.anims.resume(); }
-      m.cd = Math.max(0, m.cd - dt);
+      // 9차(⑤ #12): 대지 가르기로 느려진 동안 공격 대기 시간이 1/slowFactor 속도로 줄고 걸음도 느림
+      const slow = now < (m.slowUntil ?? 0) ? 1 / skillDef('quake', bal).slowFactor : 1;
+      // ⑦ #1: 기절 중에는 공격 대기 시간이 줄지 않는다(풀리면 남은 대기부터)
+      if (!(m.stunText && now < (m.stunUntil ?? 0))) m.cd = Math.max(0, m.cd - dt * slow);
       if (m.stunText) {
         if (now >= (m.stunUntil ?? 0)) { m.stunText.destroy(); m.stunText = null; }
         else {
@@ -1225,16 +1479,22 @@ export class WorldScene extends Phaser.Scene {
       }
       const range = MON_RANGE + (m.reach || 0);
       if (m.aggro) {
-        const sp = m.def.isBoss ? MON_SPEED : MON_SPEED * 1.4;
+        const sp = (m.def.isBoss ? MON_SPEED : MON_SPEED * 1.4) * slow;
         if (d > range) { moving = this.moveBy(m.sprite, (dx / d) * sp * dt, (dy / d) * sp * dt, test); m.dir = dirOf(dx, dy); }
         else if (m.cd <= 0 && !(m.def.isBoss && this.slam?.b === m)) {
           m.cd = bal.combat.monsterAttackMs / 1000;
           m.dir = dirOf(dx, dy);
           if (m.def.isBoss && ++m.attacks % bal.boss.slamEvery === 0) { this.startSlam(m); m.cd += bal.boss.slamWarnMs / 1000; }
           else if (now >= this.invulnUntil) {
-            const r = combat.monsterAttack(m.def, st, G.save.player.level, this.rng, bal, { reduce: this.guardReduce(now) });
-            if (r.hit) this.hurtPlayer(r.dmg); else this.floatText(this.knight.x, this.knight.y - 16, 'MISS', '#c9c2b0');
-            if (!G.save || G.save.player.hp <= 0) return;
+            // 9차: 막기(켜져 있으면 막기 확률) · 아머+불굴 감소 · 반격(살아 있을 때만)
+            const blockPct = now < this.blockUntil ? skillDef('block', bal).blockPct : 0;
+            const r = combat.monsterAttack(m.def, st, G.save.player.level, this.rng, bal, { reduce: this.incomingReduce(now), blockPct });
+            let died = false;
+            if (r.blocked) this.fx.blocked(this.knight.x, this.knight.y);
+            else if (r.hit) died = this.hurtPlayer(r.dmg);
+            else this.floatText(this.knight.x, this.knight.y - 16, 'MISS', '#c9c2b0');
+            if (died || !G.save || G.save.player.hp <= 0) return;
+            if (now < this.counterUntil) { this.counterHit(m, r); if (G.pending) return; }
           }
         }
       } else if (!m.def.isBoss) {
@@ -1255,7 +1515,7 @@ export class WorldScene extends Phaser.Scene {
       if (moving) m.sprite.play(`${m.id}_walk_${m.dir}`, true);
       else { m.sprite.anims.stop(); m.sprite.setFrame(DIRS.indexOf(m.dir)); }
       m.sprite.setDepth(10 + m.sprite.y / 1000);
-      if (now - m.hurtAt >= 100) m.sprite.setTint(m.def.isBoss ? m.look.tint : 0xffffff);
+      if (now - m.hurtAt >= 100) m.sprite.setTint(m.def.isBoss ? m.look.tint : slow < 1 ? 0x9ab8ff : 0xffffff);
       else m.sprite.setTint(0xffaaaa);
       this.drawBar(m);
     }
@@ -1298,8 +1558,10 @@ export class WorldScene extends Phaser.Scene {
     this.smoke(s.x, s.y - 4, 1.2);
     if (Math.hypot(this.knight.x - s.x, this.knight.y - s.y) > s.r) { this.floatText(this.knight.x, this.knight.y - 18, '피했다!', '#9fe08a'); return; }
     if (now < this.invulnUntil) return;
-    const base = combat.monsterAttack(s.b.def, this.stats(), G.save.player.level, () => 0, bal, { reduce: this.guardReduce(now) }).dmg;
-    this.hurtPlayer(Math.max(1, Math.floor(base * bal.boss.slamMult)), '#ff3b2f');
+    const base = combat.monsterAttack(s.b.def, this.stats(), G.save.player.level, () => 0, bal, { reduce: this.incomingReduce(now) }).dmg; // 땅 울림은 막을 수 없음
+    const dmg = Math.max(1, Math.floor(base * bal.boss.slamMult));
+    // ⑦ #2: 땅 울림도 살아남으면 반격(막기는 안 됨)
+    if (!this.hurtPlayer(dmg, '#ff3b2f') && now < this.counterUntil && s.b.alive) this.counterHit(s.b, { hit: true, dmg });
   }
 
   // owner를 주면 그 보스의 울림만 취소(다른 보스의 초기화·처치가 진행 중인 울림을 지우지 않게)
@@ -1377,9 +1639,12 @@ export class WorldScene extends Phaser.Scene {
 
   // ---------- 화면 표시 ----------
   floatText(x, y, text, color, ms = 900) {
+    // ⑤ #19: 동시에 MAX_FLOATS개를 넘으면 가장 오래된 것부터 지운다
+    while (this.floats.length >= MAX_FLOATS) { const old = this.floats.shift(); this.tweens.killTweensOf(old); old.destroy(); }
     const t = this.add.text(x, y, text, { fontFamily: 'system-ui, sans-serif', fontSize: '8px', fontStyle: 'bold', color, stroke: '#000', strokeThickness: 2, resolution: 4 })
       .setOrigin(0.5).setDepth(980);
-    this.tweens.add({ targets: t, y: y - 12, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
+    this.floats.push(t);
+    this.tweens.add({ targets: t, y: y - 12, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => { t.destroy(); const i = this.floats.indexOf(t); if (i >= 0) this.floats.splice(i, 1); } });
   }
 
   refreshHud(force) {

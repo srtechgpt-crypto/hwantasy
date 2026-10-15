@@ -35,11 +35,15 @@
 
 <!-- 아래 버튼 -->
 <div class="pad" id="pad" hidden>
-  <div class="skills" id="skills">
-    <button class="skill locked" id="btnSkill_bash" type="button" aria-label="강타"><img src="assets/icons/sk_bash.png" alt=""><b>강타</b><small>Lv5</small></button>
-    <button class="skill locked" id="btnSkill_stun" type="button" aria-label="쇼크 스턴"><img src="assets/icons/sk_stun.png" alt=""><b>스턴</b><small>Lv15</small></button>
-    <button class="skill locked" id="btnSkill_whirl" type="button" aria-label="회오리 베기"><img src="assets/icons/sk_whirl.png" alt=""><b>회오리</b><small>Lv25</small></button>
-    <button class="skill locked" id="btnSkill_guard" type="button" aria-label="리덕션 아머"><img src="assets/icons/sk_guard.png" alt=""><b>아머</b><small>Lv32</small></button>
+  <!-- 9차 단축 칸: 6칸 × 2쪽(스킬·물약·귀환). 빈 칸을 누르면 [정보]→[스킬] -->
+  <div class="hotbar" id="hotbar">
+    <button class="hbpage" id="hbPage" type="button" aria-label="단축 칸 쪽 넘기기"><b id="hbPageNo">1</b><small>/2</small></button>
+    <button class="hbslot empty" id="hb0" type="button" aria-label="단축 칸 1"><img alt=""><b></b><small></small><i></i><u>1</u></button>
+    <button class="hbslot empty" id="hb1" type="button" aria-label="단축 칸 2"><img alt=""><b></b><small></small><i></i><u>2</u></button>
+    <button class="hbslot empty" id="hb2" type="button" aria-label="단축 칸 3"><img alt=""><b></b><small></small><i></i><u>3</u></button>
+    <button class="hbslot empty" id="hb3" type="button" aria-label="단축 칸 4"><img alt=""><b></b><small></small><i></i><u>4</u></button>
+    <button class="hbslot empty" id="hb4" type="button" aria-label="단축 칸 5"><img alt=""><b></b><small></small><i></i><u>5</u></button>
+    <button class="hbslot empty" id="hb5" type="button" aria-label="단축 칸 6"><img alt=""><b></b><small></small><i></i><u>6</u></button>
   </div>
   <button class="round" id="btnReturn" type="button">귀환<small id="cntReturn">3</small></button>
   <button class="round" id="btnPotion" type="button">물약<small id="cntPotion">30</small></button>
@@ -90,6 +94,9 @@
       <button class="wide" id="btnResume" type="button">게임으로 돌아가기</button>
       <div class="zoomrow"><span>화면 크기</span>
         <div class="seg"><button id="zoomFar" type="button">멀리</button><button id="zoomMid" type="button">보통</button><button id="zoomNear" type="button">가까이</button></div>
+      </div>
+      <div class="zoomrow"><span>흔들림·번쩍임</span>
+        <div class="seg"><button id="calmOff" type="button">보통</button><button id="calmOn" type="button">줄이기</button></div>
       </div>
       <button class="wide" id="btnRates" type="button">배율 바꾸기 <small id="menuRate"></small></button>
       <button class="wide ghost" id="btnSaveNow" type="button">지금 저장</button>

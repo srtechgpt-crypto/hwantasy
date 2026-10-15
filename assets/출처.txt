@@ -9,3 +9,5 @@ https://github.com/sparklinlabs/superpowers-asset-packs
 칼(sword.png, 지금은 숨김): 16x16 DungeonTileset II — 0x72 (CC0)
 https://0x72.itch.io/dungeontileset-ii
 sk_bash·sk_stun·sk_whirl·sk_guard.png — PixelLab(구독, 상업 사용 가능) 2026-10-14 생성, 5차 스킬 아이콘
+
+sk_dash·sk_quake·sk_block·sk_heal·sk_counter·sk_ult·sk_p_crit·sk_p_body·sk_p_skin·sk_p_focus·sk_p_will.png, ult_sword.png — PixelLab(구독, 상업 사용 가능) 2026-10-15 생성, 9차 스킬 아이콘·필살기 칼(원본 그림원본\pixellab_9차)

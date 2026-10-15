@@ -70,7 +70,9 @@ const rows = [
   ['crab', '광맥게', 17, 437, 31, 22, 400, 60, 'mine', false, MINE_DROPS],
   ['ember', '잿불턱', 20, 551, 36, 28, 560, 75, 'mine', false, MINE_DROPS],
   ['stalker', '흑암보행자', 24, 703, 43, 35, 800, 95, 'mine', false, MINE_DROPS],
-  ['boss', '폐광의 큰울림', 28, 5600, 74, 32, 9000, 1500, 'mine', true, [
+  // 9차: 스킬(성검·강타·막기·회복·반격)을 쓰면 보스가 쉬워져 큰울림 5600/74→6500/84, 기사왕 9000/96→10500/110
+  //      (스킬을 써도 큰울림은 초급만이면 위험·중급이면 안전, 기사왕은 고급이면 물약 절반)
+  ['boss', '폐광의 큰울림', 28, 6500, 84, 32, 9000, 1500, 'mine', true, [
     { id: 'weaponScroll', count: 2, guaranteed: true },
     { id: 'armorScroll', count: 2, guaranteed: true },
     { id: 'deepSword', count: 1, chance: 0.15 },
@@ -81,7 +83,7 @@ const rows = [
   ['skull', '불꽃해골', 33, 1120, 64, 52, 1598, 140, 'ruin', false, RUIN_DROPS],
   ['warden', '성터 파수꾼', 36, 1400, 68, 64, 2344, 165, 'ruin', false, RUIN_DROPS],
   ['eye', '저주의 눈', 39, 1640, 70, 76, 3380, 190, 'ruin', false, RUIN_DROPS],
-  ['lich', '망령 기사왕', 42, 9000, 96, 50, 30000, 3000, 'ruin', true, [
+  ['lich', '망령 기사왕', 42, 10500, 110, 50, 30000, 3000, 'ruin', true, [
     { id: 'weaponScroll', count: 3, guaranteed: true },
     { id: 'armorScroll', count: 3, guaranteed: true },
     { id: 'wraithSword', count: 1, chance: 0.1 },
@@ -101,9 +103,9 @@ export default {
   version: 1,
   // 5차(스킬·돈 ×2.5): a=155, 성터 경험치 ×1.08 → 시뮬레이터 3회 1→30 10.12h, 30→40 9.85h, 합 19.97h(게임 시계).
   // 계수는 올리기만 한다(v3 기록의 exp가 새 필요치보다 작아야 검사 통과). v2 이하 기록은 save.js의 고정 공식으로 검사·비율 변환
-  progression: { coefficient: 155, exponent: 2.15, early: { untilLevel: 22, startFactor: 0.04, power: 2.5 }, maxLevel: 40, deathLoss: 0.05, lowLevelGap: 5, lowLevelRate: 0.3 },
+  progression: { coefficient: 175, exponent: 2.15, early: { untilLevel: 22, startFactor: 0.04, power: 2.5 }, maxLevel: 40, deathLoss: 0.05, lowLevelGap: 5, lowLevelRate: 0.3 }, // 9차: 스킬·패시브로 빨라진 만큼 155→175(⑦ 돌진 반영 뒤, 1→40 약 20시간)
   knight: { baseHp: 80, hpPerLevel: 16, atkDivisor: 2, defDivisor: 4, attackMs: 750, regenBase: 2, regenDivisor: 4, regenMs: 3000 },
-  combat: { playerHit: 0.8, monsterHit: 0.7, levelHit: 0.03, minHit: 0.3, maxHit: 0.95, minDamage: 1, weaponEnchantDamage: 2, monsterDefDivisor: 2, monsterAttackMs: 1200, bareMin: 1, bareMax: 1 },
+  combat: { playerHit: 0.8, monsterHit: 0.7, levelHit: 0.03, minHit: 0.3, maxHit: 0.95, minDamage: 1, weaponEnchantDamage: 2, monsterDefDivisor: 2, monsterAttackMs: 1200, bareMin: 1, bareMax: 1, critMult: 1.5, maxReduce: 0.6 },
   weapons, armors, consumables, monsters,
   maps: [
     { id: 'field', name: '이슬 들판', recommendedLevel: { min: 1, max: 7 } },
@@ -148,13 +150,32 @@ export default {
     { id: 'mine', name: '잿돌 폐광 입구', price: 100 },
     { id: 'ruin', name: '망자의 성터 입구', price: 200 },
   ],
-  autohunt: { radiusTiles: 8, stuckSec: 3, potionHp: 0.5, returnHp: 0.2, pickupNearTiles: 1.5, guardHp: 0.7, stunHpRatio: 0.4 },
-  // 5차 스킬(마나 없음, 레벨이 되면 배움, 쿨타임은 게임 시계·저장 안 함). 공격 스킬은 일반 공격 한 번을 대신한다
+  autohunt: { radiusTiles: 8, stuckSec: 3, potionHp: 0.5, returnHp: 0.2, pickupNearTiles: 1.5, guardHp: 0.7, stunHpRatio: 0.4, healHp: 0.45, blockHp: 0.8, ultHits: 3, ultStrongRatio: 0.5 },
+  // 5차 스킬(마나 없음, 레벨이 되면 배움, 쿨타임은 게임 시계·저장 안 함). 9차: 10개 + 패시브 5개.
+  // kind: attack(공격 차례를 씀·대상 필요) / defense(대상 없이·공격 차례 안 씀) / ult(필살기, 둘레·공격 차례 씀)
+  // needsTarget·usesAttack은 자동 사냥·실행부가 이름 대신 이 값으로 판단한다(⑤ #10)
   skills: [
-    { id: 'bash', name: '강타', level: 5, cooldownMs: 6000, mult: 2 },
-    { id: 'stun', name: '쇼크 스턴', level: 15, cooldownMs: 12000, mult: 1.2, stunMs: 2000 },
-    { id: 'whirl', name: '회오리 베기', level: 25, cooldownMs: 15000, mult: 1, radiusTiles: 2.5 },
-    { id: 'guard', name: '리덕션 아머', level: 32, cooldownMs: 60000, reduce: 0.3, durationMs: 20000 },
+    { id: 'bash', name: '강타', short: '강타', kind: 'attack', level: 5, cooldownMs: 6000, needsTarget: true, usesAttack: true, mult: 2, desc: '한 번에 두 배 피해' },
+    { id: 'block', name: '방패 막기', short: '막기', kind: 'defense', level: 8, cooldownMs: 25000, needsTarget: false, usesAttack: false, blockPct: 40, durationMs: 8000, desc: '8초 동안 공격을 40% 확률로 막음' },
+    { id: 'dash', name: '돌진 베기', short: '돌진', kind: 'attack', level: 10, cooldownMs: 10000, needsTarget: true, usesAttack: true, mult: 1.6, rangeTiles: 4, minTiles: 2, desc: '4칸 안 적에게 뛰어들어 1.6배 피해' },
+    { id: 'stun', name: '쇼크 스턴', short: '스턴', kind: 'attack', level: 15, cooldownMs: 12000, needsTarget: true, usesAttack: true, mult: 1.2, stunMs: 2000, desc: '1.2배 피해 + 2초 기절(보스 제외)' },
+    { id: 'quake', name: '대지 가르기', short: '대지', kind: 'attack', level: 20, cooldownMs: 14000, needsTarget: true, usesAttack: true, mult: 1.5, radiusTiles: 3, arcDeg: 90, slowMs: 1500, slowFactor: 1.5, desc: '앞쪽 부채꼴 1.5배 피해 + 1.5초 느려짐' },
+    { id: 'heal', name: '굳센 의지', short: '회복', kind: 'defense', level: 22, cooldownMs: 40000, needsTarget: false, usesAttack: false, healPct: 25, desc: '최대 체력의 25% 즉시 회복' },
+    { id: 'whirl', name: '회오리 베기', short: '회오리', kind: 'attack', level: 25, cooldownMs: 15000, needsTarget: true, usesAttack: true, mult: 1, radiusTiles: 2.5, desc: '둘레 2.5칸 모든 적 베기' },
+    { id: 'ult', name: '성검 강림', short: '성검', kind: 'ult', level: 30, cooldownMs: 120000, needsTarget: false, usesAttack: true, mult: 4, radiusTiles: 3.5, stunMs: 1000, castMs: 650, desc: '필살기: 둘레 3.5칸 4배 피해 + 1초 기절' },
+    { id: 'guard', name: '리덕션 아머', short: '아머', kind: 'defense', level: 32, cooldownMs: 60000, needsTarget: false, usesAttack: false, reduce: 0.3, durationMs: 20000, desc: '20초 동안 받는 피해 30% 감소' },
+    { id: 'counter', name: '반격의 기운', short: '반격', kind: 'defense', level: 36, cooldownMs: 45000, needsTarget: false, usesAttack: false, counterPct: 50, durationMs: 10000, desc: '10초 동안 받은 피해의 절반을 되돌려줌' },
   ],
-  simulation: { walkSec: 3.5, serviceSec: 60, potionStock: 200, seed: 20261011 },
+  // 9차 패시브: 레벨이 되면 항상 켜짐(능력치 계산 playerStats에 반영)
+  passives: [
+    { id: 'p_crit', name: '검술 숙련', level: 3, critPct: 5, desc: '치명타 5% (피해 1.5배)' },
+    { id: 'p_body', name: '단련된 몸', level: 12, hpPct: 8, desc: '최대 체력 +8%' },
+    { id: 'p_skin', name: '철갑 피부', level: 18, def: 2, desc: '방어 +2' },
+    { id: 'p_focus', name: '전투 집중', level: 27, atkPct: 5, desc: '공격 간격 -5%' },
+    { id: 'p_will', name: '불굴', level: 38, lowHpReduce: 0.2, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -20%' },
+  ],
+  // 9차 단축 칸에 넣을 수 있는 물건
+  hotbarItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll'],
+  // walkSpeed: 기사 걸음(px/초, World SPEED) — 시뮬레이터 돌진이 줄이는 걷기 시간 계산용
+  simulation: { walkSpeed: 70, walkSec: 3.5, serviceSec: 60, potionStock: 200, seed: 20261011 },
 };

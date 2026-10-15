@@ -1,17 +1,21 @@
 import defaultBalance from '../../data/balance.js';
 import { clone, finite, integer, isRecord, itemDef, EQUIP_SLOTS, isGearDef, slotOf, enchantRule } from './common.js';
 import { needExp, playerStats, bonusPoints, validBonus } from './progression.js';
+import { defaultHotbar, validHotbar } from './hotbar.js';
 
 // 저장 형식 버전. 2 = 2026-10-13 경험치 곡선 변경(초반 빠르게). 1 → 2는 '현재 레벨에서 채운 비율'로 변환한다.
 // 3 = 2026-10-14 4차: 보스 두 마리(boss → bosses 맵), 최대 레벨 40. 2 → 3은 v2 규칙으로 전부 검사한 뒤에만 바꾼다.
 // 4 = 2026-10-15 8차: 장비 9칸(equip 키 9개), player.bonus(보너스 능력치 배분), player.rewards(받은 레벨 보상), 가방 50·창고 100.
 //     3 → 4는 v3 고정 규칙으로 전부 검사한 뒤 필드만 더한다(경험치 공식이 바뀌었으면 비율 변환)
-export const SAVE_VERSION = 4;
+// 5 = 2026-10-15 9차: save.hotbar(단축 칸 12칸·자동 사용·seen). 4 → 5는 지금 규칙으로 검사한 뒤 기본 배치만 더한다
+//     (9차 패시브는 최대 체력을 늘리기만 하므로 v4 기록의 hp는 지금 규칙으로도 범위 안)
+export const SAVE_VERSION = 5;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
 export const V3_BACKUP_KEY = 'hwantasy.v3backup';
-const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY };
+export const V4_BACKUP_KEY = 'hwantasy.v4backup';
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 // 버전 1 때의 경험치 공식(고정): round(72 × L^2.15). 변환 전 v1 검사·비율 계산에만 쓴다
@@ -46,7 +50,10 @@ function legacyBal(bal, version) {
   };
 }
 // 버전에 맞는 검사 규칙(지금 버전만 지금 밸런스 그대로)
-export const balFor = (bal, version) => (version === SAVE_VERSION ? bal : legacyBal(bal, version));
+// v4(8차 게시본) 고정 규칙: 경험치 계수 155. 아이템·지도·체력 공식은 9차에 줄지 않아 지금 것으로 검사(패시브는 최대 체력을 늘리기만 함)
+const V4_PROGRESSION = { coefficient: 155 };
+export const balFor = (bal, version) => (version === SAVE_VERSION ? bal
+  : version === 4 ? { ...bal, progression: { ...bal.progression, ...V4_PROGRESSION } } : legacyBal(bal, version));
 
 // uid and nextUid are positive safe integers. Gear: {uid,id,count:1,enchant};
 // consumables: {uid,id,count}. Equip holds references to bag gear, never copies.
@@ -66,6 +73,7 @@ export function newGame(bal) {
     bosses: Object.fromEntries(V3_BOSSES.map(id => [id, null])), nextUid: bag.length + 1,
   };
   save.player.hp = statsOf(save, bal).maxHp;
+  save.hotbar = defaultHotbar(1, bal);
   return save;
 }
 // 8차: 저장의 장착 장비·보너스로 계산한 능력치(v4 형식만)
@@ -143,6 +151,8 @@ export function validate(save, bal, version = SAVE_VERSION) {
     catch { bad('장비 정보가 올바르지 않습니다'); }
   }
   if (!isRecord(save.rates) || Object.keys(bal.rates).some(key => !bal.rates[key].includes(save.rates[key]))) bad('배율이 올바르지 않습니다');
+  if (version >= 5) { try { if (!levelOk || !validHotbar(save.hotbar, p.level, bal)) bad('단축 칸이 올바르지 않습니다'); } catch { bad('단축 칸이 올바르지 않습니다'); } }
+  else if ('hotbar' in save) bad('옛 버전 기록에 단축 칸이 있습니다');
   const bossTime = at => at === null || integer(at);
   if (version < 3) {
     if (!isRecord(save.boss) || !bossTime(save.boss.defeatedAt)) bad('보스 처치 시각이 올바르지 않습니다');
@@ -155,7 +165,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
   }
   return { ok: errors.length === 0, errors };
 }
-// 저장을 지금 버전(3)으로 바꾼다. 한 단계씩(1→2→3), 각 단계 전에 그 버전의 옛 규칙으로 전부 검사한다.
+// 저장을 지금 버전(5)으로 바꾼다. 한 단계씩(1→2→3→4→5), 각 단계 전에 그 버전의 옛 규칙으로 전부 검사한다.
 // 1→2 경험치: 레벨 유지, 새 경험치 = 옛 비율 × 새 필요치(반올림, 새 필요치 − 1 이하). 1점 미만은 잘린다.
 function v1to2(save, bal) {
   const old = balFor(bal, 1), v2 = balFor(bal, 2);
@@ -200,7 +210,23 @@ function v3to4(save, bal) {
   const p = next.player;
   p.bonus = { str: 0, dex: 0, con: 0 };
   p.rewards = [];
+  // 9차: 목표는 v4 고정 규칙(계수 155) — 다음 단계(v4→v5) 검사를 통과하고 거기서 다시 비율 변환
   if (p.level < bal.progression.maxLevel && p.level < old.progression.maxLevel) {
+    const need = needExp(p.level, balFor(bal, 4));
+    p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
+  } else p.exp = 0;
+  return settleHp(next, bal);
+}
+// 4→5: 지금 규칙(v4)으로 전부 검사한 뒤 레벨에 맞는 기본 단축 칸을 더한다
+function v4to5(save, bal) {
+  const check = validate(save, balFor(bal, 4), 4);
+  if (!check.ok) throw new TypeError(`버전 4 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 5;
+  next.hotbar = defaultHotbar(next.player.level, bal);
+  // 경험치 계수가 바뀌었으면(155→175) 지금 레벨에서 채운 비율을 지킨다
+  const old = balFor(bal, 4), p = next.player;
+  if (p.level < bal.progression.maxLevel) {
     const need = needExp(p.level, bal);
     p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
   } else p.exp = 0;
@@ -209,11 +235,12 @@ function v3to4(save, bal) {
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   if (save.version === SAVE_VERSION) return clone(save);
-  if (![1, 2, 3].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
+  if (![1, 2, 3, 4].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
   let next = save;
   if (next.version === 1) next = v1to2(next, bal);
   if (next.version === 2) next = v2to3(next, bal);
-  return v3to4(next, bal);
+  if (next.version === 3) next = v3to4(next, bal);
+  return v4to5(next, bal);
 }
 // 지원하는 버전보다 새 기록(앱을 옛 버전으로 되돌린 경우 등)인지
 function futureVersion(raw) {

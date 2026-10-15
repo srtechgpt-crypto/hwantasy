@@ -12,6 +12,8 @@ import { REGIONS, mapIdAt } from '../../data/maps.js';
 import { bossRemainMs } from '../domain/boss.js';
 import { G, hud, josa } from '../state.js';
 import { savePrefs } from './prefs.js';
+import { assignSlot, setAutoUse, autoUse, PAGE_SIZE, HOTBAR_SLOTS } from '../domain/hotbar.js';
+import { learnedSkills } from '../domain/skills.js';
 
 const $ = (id) => document.getElementById(id);
 const won = (n) => n.toLocaleString('ko-KR');
@@ -59,7 +61,7 @@ const TABS = {
   tele: [['tele', '목적지']],
   rates: [['rates', '배율 고르기']],
   // 8차 내 정보: 장비 9칸 · 능력치(보너스 점수) · 레벨 보상
-  me: [['gear', '장비'], ['stats', '능력치'], ['reward', '보상']],
+  me: [['gear', '장비'], ['stats', '능력치'], ['skill', '스킬'], ['reward', '보상']],
   // 6차 큰 지도: [전체] + 지역마다 한 탭(지역 이름은 짧게)
   map: [['all', '전체'], ...REGIONS.map((r) => [r.id, r.name.split(' ').pop()])],
 };
@@ -97,7 +99,7 @@ export function initWindows() {
     if (!G.save || G.pending) return;
     // 지도는 지금 있는 지역 탭으로 연다
     if (kind === 'map' && !opts.tab && G.scene?.knight) opts = { ...opts, tab: mapIdAt(G.scene.knight.x) };
-    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, qtyFresh: true, confirm: null, busy: false, fx: null, junk: null, slot: null, draft: null, confirmReset: false };
+    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], pick: null, hbSel: null, sel: null, buyId: null, qty: 1, qtyFresh: true, confirm: null, busy: false, fx: null, junk: null, slot: null, draft: null, confirmReset: false };
     if (kind === 'rates') { cur.orig = { ...G.save.rates }; cur.draft = { ...G.save.rates }; }
     G.pause.add('window');
     G.scene?.releaseInput();
@@ -139,7 +141,7 @@ export function initWindows() {
       ? TABS[cur.kind].map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
       : '';
     $('winGold').textContent = won(s.player.gold);
-    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, gear: viewGear, stats: viewStats, reward: viewReward }[cur.tab];
+    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, gear: viewGear, stats: viewStats, skill: viewSkill, reward: viewReward }[cur.tab];
     // 탭 이름 옆 ! (남은 보너스 점수·받을 보상)
     if (cur.kind === 'me') {
       for (const [id, on] of [['stats', inv.unspentPoints(s, bal) > 0], ['reward', inv.readyRewards(s, bal).length > 0]]) {
@@ -411,6 +413,52 @@ export function initWindows() {
     return `<p class="sub-t">레벨을 달성하면 한 번씩 받을 수 있습니다. 가방에 자리가 있어야 합니다(지금 ${s.bag.length}/${bal.inventory.bagSlots}).</p>${rows}`;
   }
 
+  // ---------- 9차 스킬·단축 칸 ----------
+  // 위: 단축 칸 12칸(1쪽·2쪽). 아래 고른 것을 [칸에 넣기] → 칸을 누르면 들어감. 칸만 누르면 [비우기]
+  // 가운데: 액티브 스킬 카드(배운 것·못 배운 것, 자동 사용 켜기/끄기), 물건 줄, 패시브
+  const KIND_NAME = { attack: '공격', defense: '방어', ult: '필살기' };
+  const ITEM_SHORT = { potion: '초급 물약', potionMid: '중급 물약', potionHigh: '고급 물약', returnScroll: '귀환 주문서' };
+  const slotIcon = (e) => (e.t === 'skill' ? `sk_${e.id}` : e.id);
+  const slotName = (e) => (e.t === 'skill' ? bal.skills.find((k) => k.id === e.id)?.name : ITEM_SHORT[e.id]) ?? e.id;
+  function viewSkill(s) {
+    const h = s.hotbar, lv = s.player.level, learned = new Set(learnedSkills(lv, bal));
+    const pickOn = (t, id) => cur.pick && cur.pick.t === t && cur.pick.id === id;
+    const slots = [0, 1].map((page) => {
+      const cells = Array.from({ length: PAGE_SIZE }, (_, j) => {
+        const i = page * PAGE_SIZE + j, e = h.slots[i];
+        const cls = ['hbcell', e ? '' : 'empty', cur.hbSel === i ? 'on' : '', cur.pick ? 'target' : ''].join(' ');
+        return `<button type="button" class="${cls}" data-act="hbslot" data-i="${i}" aria-label="${page + 1}쪽 ${j + 1}번 칸${e ? ` ${esc(slotName(e))}` : ' 비어 있음'}">
+          ${e ? icon(slotIcon(e)) : '<span class="plus">+</span>'}<u>${j + 1}</u></button>`;
+      }).join('');
+      return `<div class="hbrow"><b>${page + 1}쪽</b>${cells}</div>`;
+    }).join('');
+    const sel = cur.hbSel !== null ? h.slots[cur.hbSel] : null;
+    const help = cur.pick ? `<b>${esc(slotName(cur.pick))}</b>을(를) 넣을 칸을 누르세요 <button type="button" class="act" data-act="hbcancel">그만두기</button>`
+      : sel ? `${Math.floor(cur.hbSel / PAGE_SIZE) + 1}쪽 ${cur.hbSel % PAGE_SIZE + 1}번: <b>${esc(slotName(sel))}</b> <button type="button" class="act" data-act="hbclear">비우기</button>`
+        : '아래에서 [칸에 넣기]를 누른 뒤 칸을 고르세요. 게임 화면의 [1/2]로 쪽을 넘깁니다(PC: 1~6, Tab).';
+    const card = (k) => {
+      const has = learned.has(k.id), auto = autoUse(h, k.id);
+      return `<div class="skcard ${has ? '' : 'locked'} ${k.kind} ${pickOn('skill', k.id) ? 'picked' : ''}">
+        <img class="ic" src="assets/icons/sk_${k.id}.png" alt="">
+        <div class="sktext"><b>${esc(k.name)}</b> <em>${KIND_NAME[k.kind]} · Lv ${k.level} · ${Math.round(k.cooldownMs / 1000)}초</em><p>${esc(k.desc)}</p></div>
+        ${has ? `<div class="skbtns"><button type="button" class="act primary" data-act="hbpick" data-t="skill" data-id="${k.id}">칸에 넣기</button>
+          <button type="button" class="act tog ${auto ? 'on' : ''}" data-act="hbauto" data-id="${k.id}" aria-pressed="${auto}">자동 ${auto ? '켜짐' : '꺼짐'}</button></div>`
+          : `<em class="sub-t">Lv ${k.level}에 배움</em>`}
+      </div>`;
+    };
+    const skills = [...bal.skills].sort((a, b) => a.level - b.level).map(card).join('');
+    const items = (bal.hotbarItems ?? []).map((id) => `<button type="button" class="act itempick ${pickOn('item', id) ? 'picked' : ''}" data-act="hbpick" data-t="item" data-id="${id}">${icon(id)}${ITEM_SHORT[id]}</button>`).join('');
+    const passives = (bal.passives ?? []).map((p) => `<div class="pscard ${lv >= p.level ? 'on' : 'locked'}"><img class="ic" src="assets/icons/sk_${p.id}.png" alt=""><div><b>${esc(p.name)}</b> <em>${lv >= p.level ? '켜짐' : `Lv ${p.level}`}</em><p>${esc(p.desc)}</p></div></div>`).join('');
+    return `<div class="hbbox">${slots}<p class="hbhelp">${help}</p></div>
+      <h4 class="skh">액티브 스킬 <small>자동 사냥은 '자동 켜짐'인 스킬만 씁니다(단축 칸에 없어도)</small></h4><div class="skgrid">${skills}</div>
+      <h4 class="skh">물약·주문서</h4><div class="itemrow">${items}</div>
+      <h4 class="skh">패시브 <small>배우면 항상 켜짐</small></h4><div class="psgrid">${passives}</div>`;
+  }
+  // 단축 칸 바꾸기: 저장에 성공해야 확정(G.commit), 게임 화면 칸도 다시 그림
+  function saveHotbar(next, okText) {
+    return deal({ ok: true, save: { ...G.save, hotbar: next } }, 'hotbar', { okText, after: () => { G.scene?.refreshSkills(true); } });
+  }
+
   // 상점 팔기
   function viewSell(s) {
     const it = selected(s);
@@ -511,7 +559,7 @@ export function initWindows() {
   $('winTabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act="tab"]');
     if (!b || !cur || cur.busy) return;
-    cur.tab = b.dataset.tab; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; cur.draft = null; cur.confirmReset = false; msg('');
+    cur.tab = b.dataset.tab; cur.pick = null; cur.hbSel = null; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; cur.draft = null; cur.confirmReset = false; msg('');
     render();
   });
   $('winClose').addEventListener('click', close);
@@ -576,6 +624,33 @@ export function initWindows() {
           after: () => { if (cur) cur.busy = false; hud.log(`<b style="color:#e0a63e">${lv}레벨 보상</b> · ${r.items.map((g) => `${itemDef(g.id, bal).name}${g.count > 1 ? ` ${g.count}개` : ''}`).join(', ')}${r.gold ? ` · ${won(r.gold)}원` : ''}`); G.scene?.refreshHud(true); },
         });
         if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      // 9차 단축 칸
+      case 'hbpick': cur.pick = { t: d.t, id: d.id }; cur.hbSel = null; msg(''); break;
+      case 'hbcancel': cur.pick = null; msg(''); break;
+      case 'hbslot': {
+        const i = Number(d.i);
+        if (!(i >= 0 && i < HOTBAR_SLOTS)) return;
+        if (!cur.pick) { cur.hbSel = cur.hbSel === i || !s.hotbar.slots[i] ? null : i; msg(''); break; }
+        let next;
+        try { next = assignSlot(s.hotbar, i, cur.pick, s.player.level, bal); } catch (err) { msg(err.message, true); return; }
+        const name = slotName(cur.pick);
+        cur.pick = null; cur.hbSel = null;
+        saveHotbar(next, `${name}을(를) ${Math.floor(i / PAGE_SIZE) + 1}쪽 ${i % PAGE_SIZE + 1}번 칸에 넣었습니다`);
+        return;
+      }
+      case 'hbclear': {
+        if (cur.hbSel === null) return;
+        const i = cur.hbSel;
+        cur.hbSel = null;
+        saveHotbar(assignSlot(s.hotbar, i, null, s.player.level, bal), '칸을 비웠습니다');
+        return;
+      }
+      case 'hbauto': {
+        const on = !autoUse(s.hotbar, d.id);
+        const name = bal.skills.find((k) => k.id === d.id)?.name ?? d.id;
+        saveHotbar(setAutoUse(s.hotbar, d.id, on, bal), `자동 사냥에서 ${name}을(를) ${on ? '씁니다' : '쓰지 않습니다'}`);
         return;
       }
       case 'goEnchant': cur.tab = 'enchant'; cur.confirm = null; cur.fx = null; break;

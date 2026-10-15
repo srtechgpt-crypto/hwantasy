@@ -10,11 +10,17 @@ export function decideAuto(ctx, bal) {
       (ctx.items !== undefined && (!Array.isArray(ctx.items) || ctx.items.some(it => !isRecord(it) || !integer(it.id) || !finite(it.x) || !finite(it.y)))) ||
       (ctx.skills !== undefined && (!Array.isArray(ctx.skills) || ctx.skills.some(sk => !isRecord(sk) || typeof sk.id !== 'string' || typeof sk.ready !== 'boolean'))) ||
       (ctx.skipIds !== undefined && !Array.isArray(ctx.skipIds)) ||
-      (ctx.nearCount !== undefined && !integer(ctx.nearCount))) {
+      (ctx.nearCount !== undefined && !integer(ctx.nearCount)) ||
+      (ctx.threat !== undefined && !integer(ctx.threat)) || (ctx.ultStrong !== undefined && !integer(ctx.ultStrong)) ||
+      (ctx.hits !== undefined && (!isRecord(ctx.hits) || Object.values(ctx.hits).some(v => !integer(v))))) {
     return { action: 'stop', reason: '자동 사냥 정보가 올바르지 않습니다' };
   }
   const p = ctx.player, rule = bal.autohunt;
   if (p.hp === 0) return { action: 'stop', reason: '사망했습니다' };
+  // 9차(⑤ #9): 생존 순서 — ① 회복 스킬(체력 45% 이하, 대상·물약과 무관) ② 귀환(물약 0·체력 20% 이하) ③ 물약(50% 이하) ④ 방어 ⑤ 공격.
+  // ctx.skills에는 배웠고 '자동 사용'이 켜진 스킬만 들어온다(끈 스킬은 World가 뺀다)
+  const ready = new Set((ctx.skills ?? []).filter(sk => sk.ready).map(sk => sk.id));
+  if (ready.has('heal') && p.hp <= p.maxHp * rule.healHp) return { action: 'skill', skillId: 'heal' };
   // 가방이 가득 차도 귀환하지 않는다(3차): 들어가지 않는 물건은 땅에 두고 계속 사냥. ctx.bagFull은 입력 호환용으로만 받는다
   if (ctx.potions === 0 || p.hp <= p.maxHp * rule.returnHp) {
     if (!ctx.returnScrolls) return { action: 'stop', reason: ctx.potions === 0 ? '물약·귀환 주문서가 없습니다' : '귀환 주문서가 없습니다' };
@@ -46,12 +52,19 @@ export function decideAuto(ctx, bal) {
   // 이미 싸우던 대상(targetId)이 붙어 있으면 계속 싸운다. 새로 고른 몬스터라면 떨어진 것부터 줍는다
   const fighting = target && target.id === ctx.targetId;
   if (target && distance(p, target) <= ctx.attackRange && (fighting || !item)) {
-    // 5차 스킬: 준비된 것만. 리덕션 아머는 공격 차례와 상관없이, 나머지는 공격 한 번을 대신한다
-    const ready = new Set((ctx.skills ?? []).filter(sk => sk.ready).map(sk => sk.id));
-    const crowd = (ctx.nearCount ?? 1) >= 2;
+    // 5차 스킬: 준비된 것만. 방어 스킬은 공격 차례와 상관없이, 공격 스킬은 공격 한 번을 대신한다.
+    // 9차(⑤ #11): 덤비는 수(threat)와 스킬별 실제로 맞을 수(hits)를 따로 본다. 옛 호출은 nearCount로
+    const threat = ctx.threat ?? ctx.nearCount ?? 1;
+    const crowd = threat >= 2;
+    const hits = { whirl: ctx.nearCount ?? 1, quake: 1, ult: 1, ...(ctx.hits ?? {}) };
     if (ready.has('guard') && (p.hp <= p.maxHp * rule.guardHp || crowd)) return { action: 'skill', skillId: 'guard', targetId: target.id };
+    if (ready.has('block') && (p.hp <= p.maxHp * rule.blockHp || crowd)) return { action: 'skill', skillId: 'block', targetId: target.id };
+    if (ready.has('counter') && crowd) return { action: 'skill', skillId: 'counter', targetId: target.id };
     if (ctx.attackReady) {
-      if (ready.has('whirl') && crowd) return { action: 'skill', skillId: 'whirl', targetId: target.id };
+      // 필살기: 맞을 몬스터가 ultHits 이상이고 그중 체력 넉넉한(50%+) 것이 2마리 이상일 때만(빈사 무리에 낭비하지 않게)
+      if (ready.has('ult') && hits.ult >= rule.ultHits && (ctx.ultStrong ?? 0) >= 2) return { action: 'skill', skillId: 'ult', targetId: target.id };
+      if (ready.has('whirl') && hits.whirl >= 2) return { action: 'skill', skillId: 'whirl', targetId: target.id };
+      if (ready.has('quake') && hits.quake >= 2) return { action: 'skill', skillId: 'quake', targetId: target.id };
       if (ready.has('stun') && (target.hpRatio ?? 1) >= rule.stunHpRatio) return { action: 'skill', skillId: 'stun', targetId: target.id };
       if (ready.has('bash')) return { action: 'skill', skillId: 'bash', targetId: target.id };
       return { action: 'attack', targetId: target.id };
@@ -66,6 +79,11 @@ export function decideAuto(ctx, bal) {
   if (!target) {
     if (ctx.huntArea !== undefined) return { action: 'roam' };
     return distance(p, ctx.center) > 0 ? { action: 'move', x: ctx.center.x, y: ctx.center.y } : { action: 'idle' };
+  }
+  // 9차(⑤ #8): 돌진 — 공격 차례이고 대상이 minTiles~rangeTiles 칸에 있으면 이동 대신 돌진(갈 수 있는지는 World가 실행 직전 검사, 안 되면 이동)
+  if (ready.has('dash') && ctx.attackReady && !item) {
+    const d = distance(p, target), dash = bal.skills.find(s => s.id === 'dash');
+    if (d >= dash.minTiles * ctx.tile && d <= dash.rangeTiles * ctx.tile) return { action: 'skill', skillId: 'dash', targetId: target.id, x: target.x, y: target.y };
   }
   return far ? { action: 'move', targetId: target.id, x: target.x, y: target.y, far: true } : { action: 'move', targetId: target.id, x: target.x, y: target.y };
 }
