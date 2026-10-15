@@ -1,13 +1,17 @@
 import defaultBalance from '../../data/balance.js';
-import { clone, finite, integer, isRecord, itemDef } from './common.js';
-import { needExp } from './progression.js';
+import { clone, finite, integer, isRecord, itemDef, EQUIP_SLOTS, isGearDef, slotOf, enchantRule } from './common.js';
+import { needExp, playerStats, bonusPoints, validBonus } from './progression.js';
 
 // 저장 형식 버전. 2 = 2026-10-13 경험치 곡선 변경(초반 빠르게). 1 → 2는 '현재 레벨에서 채운 비율'로 변환한다.
 // 3 = 2026-10-14 4차: 보스 두 마리(boss → bosses 맵), 최대 레벨 40. 2 → 3은 v2 규칙으로 전부 검사한 뒤에만 바꾼다.
-export const SAVE_VERSION = 3;
+// 4 = 2026-10-15 8차: 장비 9칸(equip 키 9개), player.bonus(보너스 능력치 배분), player.rewards(받은 레벨 보상), 가방 50·창고 100.
+//     3 → 4는 v3 고정 규칙으로 전부 검사한 뒤 필드만 더한다(경험치 공식이 바뀌었으면 비율 변환)
+export const SAVE_VERSION = 4;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
+export const V3_BACKUP_KEY = 'hwantasy.v3backup';
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 // 버전 1 때의 경험치 공식(고정): round(72 × L^2.15). 변환 전 v1 검사·비율 계산에만 쓴다
@@ -18,18 +22,30 @@ const V2_PROGRESSION = { coefficient: 127, exponent: 2.15, early: { untilLevel: 
 const LEGACY_ITEMS = ['woodSword', 'ironSword', 'steelSword', 'deepSword', 'clothArmor', 'leatherArmor', 'chainArmor', 'plateArmor',
   'potion', 'returnScroll', 'weaponScroll', 'armorScroll'];
 const LEGACY_MAPS = ['field', 'forest', 'mine'];
+// 버전 3(4~7차 게시본) 고정 규칙: 계수 155·최대 40, 아이템 16종(+미스릴·망령 4종), 지도 4곳, 가방 30·창고 60, 장비 2칸,
+// 최대 체력 80 + 16(L−1). 8차에서 밸런스를 바꿔도 v3 기록은 이 규칙으로 검사·변환한다
+const V3_PROGRESSION = { coefficient: 155, exponent: 2.15, early: { untilLevel: 22, startFactor: 0.04, power: 2.5 }, maxLevel: 40 };
+const V3_ITEMS = [...LEGACY_ITEMS, 'mithrilSword', 'wraithSword', 'mithrilArmor', 'wraithArmor'];
+const V3_MAPS = ['field', 'forest', 'mine', 'ruin'];
+const LEGACY_HP = { baseHp: 80, hpPerLevel: 16 };
+const LEGACY_INVENTORY = { bagSlots: 30, warehouseSlots: 60, stackMax: 999 };
 function legacyBal(bal, version) {
-  const keep = list => list.filter(def => LEGACY_ITEMS.includes(def.id));
+  const ids = version === 3 ? V3_ITEMS : LEGACY_ITEMS;
+  const maps = version === 3 ? V3_MAPS : LEGACY_MAPS;
+  const keep = list => list.filter(def => ids.includes(def.id));
   return {
     ...bal,
     weapons: keep(bal.weapons), armors: keep(bal.armors), consumables: keep(bal.consumables),
-    maps: bal.maps.filter(map => LEGACY_MAPS.includes(map.id)),
+    maps: bal.maps.filter(map => maps.includes(map.id)),
+    inventory: LEGACY_INVENTORY,
+    knight: { ...bal.knight, ...LEGACY_HP },
     progression: version === 1
       ? { ...bal.progression, ...V1_PROGRESSION, early: undefined, maxLevel: 30 }
-      : { ...bal.progression, ...V2_PROGRESSION, maxLevel: 30 },
+      : version === 2 ? { ...bal.progression, ...V2_PROGRESSION, maxLevel: 30 }
+        : { ...bal.progression, ...V3_PROGRESSION },
   };
 }
-// 버전에 맞는 검사 규칙(v3은 지금 밸런스 그대로)
+// 버전에 맞는 검사 규칙(지금 버전만 지금 밸런스 그대로)
 export const balFor = (bal, version) => (version === SAVE_VERSION ? bal : legacyBal(bal, version));
 
 // uid and nextUid are positive safe integers. Gear: {uid,id,count:1,enchant};
@@ -40,13 +56,28 @@ export function newGame(bal) {
     { uid: 2, id: bal.start.armor, count: 1, enchant: 0 },
     ...bal.start.items.map((item, i) => ({ uid: i + 3, ...item })),
   ];
-  return {
+  const equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, null]));
+  Object.assign(equip, { weapon: 1, armor: 2 });
+  const save = {
     version: SAVE_VERSION, seq: 0, savedAt: 0,
-    player: { level: 1, exp: 0, hp: bal.knight.baseHp, gold: bal.start.gold, map: bal.town.id, x: bal.town.x, y: bal.town.y },
-    equip: { weapon: 1, armor: 2 }, bag, warehouse: [],
+    player: { level: 1, exp: 0, hp: 0, gold: bal.start.gold, map: bal.town.id, x: bal.town.x, y: bal.town.y, bonus: { str: 0, dex: 0, con: 0 }, rewards: [] },
+    equip, bag, warehouse: [],
     rates: { exp: 1, drop: 1, gold: 1, enchant: 1 },
     bosses: Object.fromEntries(V3_BOSSES.map(id => [id, null])), nextUid: bag.length + 1,
   };
+  save.player.hp = statsOf(save, bal).maxHp;
+  return save;
+}
+// 8차: 저장의 장착 장비·보너스로 계산한 능력치(v4 형식만)
+export function statsOf(save, bal) {
+  const equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, save.bag.find(item => item.uid === save.equip[slot]) ?? null]));
+  return playerStats(save.player.level, equip, bal, save.player.bonus);
+}
+// 8차(⑤ #2): 거래 마무리 — 최종 장비·능력치로 최대 체력을 다시 계산해 hp를 그 안으로(장비·체력 능력치가 빠져 최대가 줄 때)
+export function settleHp(save, bal) {
+  const max = statsOf(save, bal).maxHp;
+  if (save.player.hp > max) save.player.hp = max;
+  return save;
 }
 export function validate(save, bal, version = SAVE_VERSION) {
   const errors = [];
@@ -62,7 +93,12 @@ export function validate(save, bal, version = SAVE_VERSION) {
   if (!isRecord(p)) bad('플레이어 정보가 없습니다');
   else {
     if (!integer(p.exp) || (levelOk && (p.level === bal.progression.maxLevel ? p.exp !== 0 : p.exp >= needExp(p.level, bal)))) bad('경험치가 올바르지 않습니다');
-    if (!finite(p.hp) || (levelOk && p.hp > bal.knight.baseHp + bal.knight.hpPerLevel * (p.level - 1))) bad('체력이 올바르지 않습니다');
+    if (!finite(p.hp) || (levelOk && version < 4 && p.hp > bal.knight.baseHp + bal.knight.hpPerLevel * (p.level - 1))) bad('체력이 올바르지 않습니다');
+    if (version >= 4) {
+      if (!validBonus(p.bonus) || (levelOk && p.bonus.str + p.bonus.dex + p.bonus.con > bonusPoints(p.level, bal))) bad('보너스 능력치가 올바르지 않습니다');
+      const levels = (bal.levelRewards ?? []).map(r => r.level);
+      if (!Array.isArray(p.rewards) || p.rewards.some((lv, i) => !levels.includes(lv) || (levelOk && lv > p.level) || (i > 0 && lv <= p.rewards[i - 1]))) bad('레벨 보상 기록이 올바르지 않습니다');
+    }
     if (!integer(p.gold)) bad('돈이 올바르지 않습니다');
     if (![bal.town.id, ...bal.maps.map(map => map.id)].includes(p.map)) bad('지도가 올바르지 않습니다');
     if (!finite(p.x) || !finite(p.y)) bad('위치가 올바르지 않습니다');
@@ -81,18 +117,30 @@ export function validate(save, bal, version = SAVE_VERSION) {
       }
       const def = itemDef(item.id, bal);
       if (!def) { bad('알 수 없는 아이템입니다'); continue; }
-      const gear = def.kind === 'weapon' || def.kind === 'armor';
+      const gear = isGearDef(def);
       if (!integer(item.count, 1, gear ? 1 : bal.inventory.stackMax)) bad('아이템 수량이 올바르지 않습니다');
-      if (gear ? !integer(item.enchant, 0, bal.enchant[def.kind].max) : item.enchant !== undefined) bad('아이템 강화 단계가 올바르지 않습니다');
+      if (gear ? !integer(item.enchant, 0, enchantRule(def, bal).max) : item.enchant !== undefined) bad('아이템 강화 단계가 올바르지 않습니다');
     }
   }
   if (integer(save.nextUid, 1) && save.nextUid <= maxUid) bad('다음 uid는 기존 uid보다 커야 합니다');
-  if (!isRecord(save.equip)) bad('장착 정보가 없습니다');
-  else for (const kind of ['weapon', 'armor']) {
-    const uid = save.equip[kind];
-    if (uid === null) continue;
-    const item = Array.isArray(save.bag) ? save.bag.find(item => isRecord(item) && item.uid === uid) : null;
-    if (!integer(uid, 1) || !item || itemDef(item.id, bal)?.kind !== kind) bad('장착 장비는 가방 안의 맞는 종류를 가리켜야 합니다');
+  const slots = version >= 4 ? EQUIP_SLOTS : ['weapon', 'armor'];
+  let equipOk = isRecord(save.equip);
+  if (!equipOk) bad('장착 정보가 없습니다');
+  else {
+    if (version >= 4 && (Object.keys(save.equip).length !== slots.length || slots.some(slot => !Object.hasOwn(save.equip, slot)))) { bad('장착 칸이 올바르지 않습니다'); equipOk = false; }
+    const used = new Set();
+    for (const slot of slots) {
+      const uid = save.equip[slot];
+      if (uid === null) continue;
+      const item = Array.isArray(save.bag) ? save.bag.find(item => isRecord(item) && item.uid === uid) : null;
+      if (!integer(uid, 1) || !item || slotOf(itemDef(item.id, bal)) !== slot || used.has(uid)) { bad('장착 장비는 가방 안의 맞는 종류를 가리켜야 합니다'); equipOk = false; }
+      used.add(uid);
+    }
+  }
+  // 8차: 최대 체력은 장비·체력 능력치에 따라 달라진다 — 다른 검사가 모두 통과했을 때만 계산해 hp 범위를 본다
+  if (version >= 4 && errors.length === 0 && equipOk) {
+    try { if (p.hp > statsOf(save, bal).maxHp) bad('체력이 올바르지 않습니다'); }
+    catch { bad('장비 정보가 올바르지 않습니다'); }
   }
   if (!isRecord(save.rates) || Object.keys(bal.rates).some(key => !bal.rates[key].includes(save.rates[key]))) bad('배율이 올바르지 않습니다');
   const bossTime = at => at === null || integer(at);
@@ -124,28 +172,48 @@ function v1to2(save, bal) {
   return next;
 }
 // 2→3: 아이템은 그대로, 경험치는 1→2처럼 옛 비율 × 새 필요치(5차 계수 변경), boss.defeatedAt → bosses.boss, 기사왕은 처치 기록 없음
+// 8차(⑤ #1): 목표 필요치는 지금 밸런스가 아니라 v3 고정 규칙으로(다음 단계 v3 검사가 통과하도록)
 function v2to3(save, bal) {
-  const old = balFor(bal, 2);
+  const old = balFor(bal, 2), v3 = balFor(bal, 3);
   const check = validate(save, old, 2);
   if (!check.ok) throw new TypeError(`버전 2 저장 검사 실패: ${check.errors.join('; ')}`);
   const next = clone(save);
   next.version = 3;
   const p = next.player;
   if (p.level < old.progression.maxLevel) {
-    const need = needExp(p.level, bal);
+    const need = needExp(p.level, v3);
     p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
   }
   next.bosses = { boss: save.boss.defeatedAt, lich: null };
   delete next.boss;
   return next;
 }
+// 3→4: 장비 칸 7개(null)·보너스 0·받은 보상 없음을 더한다. 경험치 공식이 v3과 다르면 비율 변환(최대 레벨은 0 유지).
+// hp는 새 최대 체력 이하로(새 공식은 옛 값 이상이라 보통 그대로)
+function v3to4(save, bal) {
+  const old = balFor(bal, 3);
+  const check = validate(save, old, 3);
+  if (!check.ok) throw new TypeError(`버전 3 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 4;
+  next.equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, save.equip[slot] ?? null]));
+  const p = next.player;
+  p.bonus = { str: 0, dex: 0, con: 0 };
+  p.rewards = [];
+  if (p.level < bal.progression.maxLevel && p.level < old.progression.maxLevel) {
+    const need = needExp(p.level, bal);
+    p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
+  } else p.exp = 0;
+  return settleHp(next, bal);
+}
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   if (save.version === SAVE_VERSION) return clone(save);
-  if (save.version !== 1 && save.version !== 2) throw new TypeError('지원하지 않는 저장 버전입니다');
+  if (![1, 2, 3].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
   let next = save;
   if (next.version === 1) next = v1to2(next, bal);
-  return v2to3(next, bal);
+  if (next.version === 2) next = v2to3(next, bal);
+  return v3to4(next, bal);
 }
 // 지원하는 버전보다 새 기록(앱을 옛 버전으로 되돌린 경우 등)인지
 function futureVersion(raw) {
@@ -173,10 +241,10 @@ function keepLegacyRaw(storage) {
     try { raw = storage.getItem(key); } catch { return { ok: false, reason: '저장 공간을 읽지 못해 저장하지 않았습니다' }; }
     if (raw === null || raw === undefined) continue;
     try { const o = JSON.parse(raw); v = o?.version; seq = Number.isSafeInteger(o?.seq) ? o.seq : -1; } catch { continue; }
-    if ((v === 1 || v === 2) && (!newest[v] || seq > newest[v].seq)) newest[v] = { raw, seq };
+    if (BACKUP_KEYS[v] && (!newest[v] || seq > newest[v].seq)) newest[v] = { raw, seq };
   }
   for (const [v, { raw }] of Object.entries(newest)) {
-    const backupKey = v === '1' ? V1_BACKUP_KEY : V2_BACKUP_KEY;
+    const backupKey = BACKUP_KEYS[v];
     try {
       if (storage.getItem(backupKey) === null) storage.setItem(backupKey, raw);
       if (storage.getItem(backupKey) === null) throw new Error('보관 확인 실패');
@@ -234,7 +302,7 @@ export function loadSave(storage, bal) {
   }
   valid.sort((a, b) => b.save.seq - a.save.seq || b.save.savedAt - a.save.savedAt);
   // 옛 버전 원문은 처음 변환할 때 실제로 불러오는 최신 기록을 버전별로 한 번 보관한다(되돌림용)
-  const backupKey = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY }[valid[0]?.from];
+  const backupKey = BACKUP_KEYS[valid[0]?.from];
   if (backupKey) {
     try { if (storage.getItem(backupKey) === null) storage.setItem(backupKey, valid[0].raw); } catch { /* 보관 실패는 진행 */ }
   }

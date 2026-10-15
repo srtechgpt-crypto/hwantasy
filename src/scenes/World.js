@@ -12,6 +12,7 @@ import { decideAuto } from '../domain/autohunt.js';
 import { findPath } from '../domain/path.js';
 import { learnedSkills, skillDef } from '../domain/skills.js';
 import { compareGear } from '../domain/compare.js';
+import { statsOf } from '../domain/save.js';
 import { createJoystick } from '../ui/joystick.js';
 import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
@@ -45,7 +46,8 @@ const MON_KEYS = {
 const MON_FRAME = { lich: 48 }; // 그림 한 칸 크기(없으면 16). 기사왕은 PixelLab 48×48 칸
 // 먼저 덤비는 몬스터. 4차 성터 몬스터는 공격이 세서(한 마리씩 싸우는 시뮬레이터 기준으로 맞춤) 먼저 덤비지 않고, 때리면 반격한다
 const AGGRESSIVE = new Set(['hopfrog', 'goblin', 'raccoon', 'vine', 'nightwing', 'crab', 'ember', 'stalker']);
-const ICON_IDS = ['woodSword', 'ironSword', 'steelSword', 'deepSword', 'mithrilSword', 'wraithSword', 'clothArmor', 'leatherArmor', 'chainArmor', 'plateArmor', 'mithrilArmor', 'wraithArmor', 'potion', 'returnScroll', 'weaponScroll', 'armorScroll'];
+// 8차: 모든 아이템 아이콘(부위 장비 28종·물약 3종 포함)
+const ICON_IDS = [...bal.weapons, ...bal.armors, ...bal.consumables].map((d) => d.id);
 const SWORD_TINT = { woodSword: 0xd09a62, ironSword: 0xffffff, steelSword: 0xc4ecff, deepSword: 0xc89cff, mithrilSword: 0xd8f4ff, wraithSword: 0xb08cff };
 const BOSS_REACH = 12; // 보스는 몸이 커서 공격이 조금 더 멀리서 닿는다
 // 보스별 모양·문구(id = 보스 몬스터 id = 보스 방 id)
@@ -56,7 +58,6 @@ const BOSS_LOOK = {
 
 const monDef = (id) => bal.monsters.find((m) => m.id === id);
 const DARK_REGIONS = new Set(['mine', 'ruin']); // 어두운 지역(기사 둘레만 밝음)
-const potionDef = bal.consumables.find((c) => c.id === 'potion');
 const countOf = (save, id) => save.bag.filter((i) => i.id === id).reduce((s, i) => s + (i.count ?? 1), 0);
 const itemByUid = (save, uid) => (uid ? save.bag.find((i) => i.uid === uid) || null : null);
 const ratesOf = (save) => save.rates;
@@ -397,7 +398,7 @@ export class WorldScene extends Phaser.Scene {
       if (mapIdAt(this.knight.x) === 'town') { hud.toast('자동 사냥은 사냥터에서 켜 주세요'); return; }
       if (inBossRoom(this.knight.x, this.knight.y)) { hud.toast('보스는 직접 싸워 주세요'); return; }
       // 6차: 켜자마자 귀환(주문서 낭비)하지 않게 — 물약이 없거나 체력이 귀환 기준 이하면 켜지 않고 안내만
-      if (countOf(G.save, 'potion') <= 0) { hud.toast('물약이 없어 자동 사냥을 켜지 않았습니다. 잡화상에서 물약을 사 주세요', 3200); return; }
+      if (inv.potionCount(G.save, bal) <= 0) { hud.toast('물약이 없어 자동 사냥을 켜지 않았습니다. 잡화상에서 물약을 사 주세요', 3200); return; }
       if (G.save.player.hp <= this.stats().maxHp * bal.autohunt.returnHp) {
         hud.toast(`체력이 ${Math.round(bal.autohunt.returnHp * 100)}% 이하라 자동 사냥을 켜지 않았습니다. 물약을 마시거나 회복한 뒤 켜 주세요`, 3200); return;
       }
@@ -561,9 +562,23 @@ export class WorldScene extends Phaser.Scene {
       this.region = r;
       this.tweens.killTweensOf(this.dark);
       this.tweens.add({ targets: this.dark, alpha: DARK_REGIONS.has(r) ? 1 : 0, duration: 700 });
-      if (r !== 'town') hud.toast(regionName(r), 1400);
+      if (r !== 'town') hud.toast(this.regionAdvice(r), 2600);
     }
     this.dark.setPosition(this.snap(this.knight.x), this.snap(this.knight.y - 8));
+  }
+
+  // 8차: 사냥터에 들어갈 때 권장 레벨과 비교해 한 줄 안내(높으면 다음 사냥터, 낮으면 위험)
+  regionAdvice(r) {
+    const name = regionName(r), lv = G.save.player.level;
+    const map = bal.maps.find((x) => x.id === r);
+    if (!map || inBossRoom(this.knight.x, this.knight.y)) return name;
+    const rec = map.recommendedLevel;
+    if (lv > rec.max + 1) {
+      const better = bal.maps.find((x) => lv >= x.recommendedLevel.min && lv <= x.recommendedLevel.max);
+      if (better && better.id !== r) return `${name} · 권장 Lv ${rec.min}~${rec.max} — ${josa(better.name, '으로/로')} 옮기면 더 빨리 성장합니다`;
+    }
+    if (lv < rec.min - 2) return `${name} · 권장 Lv ${rec.min}~${rec.max} — 아직 위험할 수 있습니다`;
+    return name;
   }
 
   updateTalk() {
@@ -590,8 +605,8 @@ export class WorldScene extends Phaser.Scene {
 
   // ---------- 기사 행동 ----------
   stats() {
-    const s = G.save;
-    return prog.playerStats(s.player.level, { weapon: itemByUid(s, s.equip.weapon), armor: itemByUid(s, s.equip.armor) }, bal);
+    // 8차: 장비 9칸 + 보너스 능력치(공격 간격·명중·재생 포함)
+    return statsOf(G.save, bal);
   }
 
   dist(m) { return Math.hypot(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y) - (m.reach || 0); }
@@ -613,7 +628,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.attackCd > 0) return false;
     const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
     if (!m) return false;
-    this.attackCd = bal.knight.attackMs / 1000;
+    this.attackCd = this.stats().attackMs / 1000;
     this.swingAt(m);
     this.strike(m);
     return true;
@@ -659,7 +674,7 @@ export class WorldScene extends Phaser.Scene {
       const list = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (manual || m.aggro || m === target));
       if (!list.length) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
       this.skillAt.whirl = this.gt + def.cooldownMs;
-      this.attackCd = bal.knight.attackMs / 1000;
+      this.attackCd = this.stats().attackMs / 1000;
       this.swingAt(list[0]);
       this.whirlFx(r);
       const fixed = { stats: this.stats(), level: G.save.player.level };
@@ -670,7 +685,7 @@ export class WorldScene extends Phaser.Scene {
     const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
     if (!m) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
     this.skillAt[id] = this.gt + def.cooldownMs;
-    this.attackCd = bal.knight.attackMs / 1000;
+    this.attackCd = this.stats().attackMs / 1000;
     this.swingAt(m, id === 'bash' ? 0xffa040 : 0xffe060);
     this.floatText(this.knight.x, this.knight.y - 24, def.name, id === 'bash' ? '#ffb070' : '#ffe680', 900);
     const r = this.strike(m, def.mult, id === 'bash' ? '#ffb070' : '#ffe680');
@@ -781,6 +796,13 @@ export class WorldScene extends Phaser.Scene {
     fx.play('fx_levelup'); fx.once('animationcomplete', () => fx.destroy());
     this.floatText(this.knight.x, this.knight.y - 22, 'LEVEL UP!', '#e0a63e', 1600);
     hud.log(`<b style="color:#e0a63e">레벨이 올랐습니다! 이제 Lv ${level}</b>`);
+    // 8차: 보너스 점수·레벨 보상 알림(정보 버튼에 ! 표시)
+    const pts = inv.unspentPoints(G.save, bal), ready = inv.readyRewards(G.save, bal);
+    if (pts > 0 || ready.length) {
+      const what = [pts > 0 ? `보너스 점수 ${pts}점` : '', ready.length ? `${ready.join('·')}레벨 보상` : ''].filter(Boolean).join(' · ');
+      this.time.delayedCall(900, () => hud.toast(`${what}을 받을 수 있습니다 — 오른쪽 위 [정보]`, 3200));
+      hud.log(`<span style="color:#9fd8ff">${what} — [정보]에서 받으세요</span>`);
+    }
   }
 
   smoke(x, y, scale) {
@@ -882,15 +904,27 @@ export class WorldScene extends Phaser.Scene {
   drinkPotion(manual) {
     const s = G.save, st = this.stats();
     if (this.potionCd > 0) return false;
-    if (countOf(s, 'potion') <= 0) { if (manual) hud.toast('물약이 없습니다'); return false; }
+    if (inv.potionCount(s, bal) <= 0) { if (manual) hud.toast('물약이 없습니다'); return false; }
     if (s.player.hp >= st.maxHp) { if (manual) hud.toast('체력이 가득 찼습니다'); return false; }
     const res = inv.usePotion(s, bal);
     if (!res.ok) { if (manual) hud.toast(res.reason); return false; }
     G.save = res.save;
     const healed = res.healed ?? 0;
-    this.potionCd = potionDef.cooldownMs / 1000;
+    const pd = bal.consumables.find((c) => c.id === res.id);
+    this.potionCd = pd.cooldownMs / 1000;
+    this.potionFx(pd.id);
     this.floatText(this.knight.x, this.knight.y - 18, `+${Math.round(healed)}`, '#7fd36a');
     return true;
+  }
+
+  // 8차: 물약 종류별 색 반짝임(초급 빨강·중급 파랑·고급 보라)
+  potionFx(id) {
+    const color = { potion: 0xff6a6a, potionMid: 0x6aa8ff, potionHigh: 0xc07aff }[id] ?? 0xff6a6a;
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 * i) / 6;
+      const p = this.add.circle(this.knight.x + Math.cos(a) * 6, this.knight.y - 8 + Math.sin(a) * 4, 1.5, color).setDepth(955);
+      this.tweens.add({ targets: p, y: p.y - 14, alpha: 0, duration: 520, ease: 'Sine.easeOut', onComplete: () => p.destroy() });
+    }
   }
 
   useReturn(why) {
@@ -920,11 +954,11 @@ export class WorldScene extends Phaser.Scene {
 
   tickRegen(dt) {
     this.regenT += dt;
-    const every = bal.knight.regenMs / 1000;
+    const st = this.stats(), every = st.regenMs / 1000;
     if (this.regenT < every) return;
     this.regenT -= every;
-    const st = this.stats(), p = G.save.player;
-    if (p.hp < st.maxHp) p.hp = Math.min(st.maxHp, p.hp + bal.knight.regenBase + Math.floor(p.level / bal.knight.regenDivisor));
+    const p = G.save.player;
+    if (p.hp < st.maxHp) p.hp = Math.min(st.maxHp, p.hp + st.regenPerTick);
   }
 
   guardReduce(now) { return now < this.guardUntil ? skillDef('guard', bal).reduce : 0; }
@@ -963,7 +997,7 @@ export class WorldScene extends Phaser.Scene {
       player: { x: this.knight.x, y: this.knight.y, hp: s.player.hp, maxHp: st.maxHp },
       center: this.autoCenter || { x: this.knight.x, y: this.knight.y },
       tile: TILE,
-      potions: countOf(s, 'potion'),
+      potions: inv.potionCount(s, bal),
       returnScrolls: countOf(s, 'returnScroll'),
       bagFull,
       potionReady: this.potionCd <= 0,
@@ -1357,7 +1391,8 @@ export class WorldScene extends Phaser.Scene {
     const need = maxLevel ? 1 : prog.needExp(lv, bal);
     hud.update({
       level: lv, hp: s.player.hp, maxHp: st.maxHp, expPct: maxLevel ? 100 : (100 * s.player.exp) / need, maxLevel,
-      gold: s.player.gold, potions: countOf(s, 'potion'), scrolls: countOf(s, 'returnScroll'),
+      gold: s.player.gold, potions: inv.potionCount(s, bal), scrolls: countOf(s, 'returnScroll'),
+      notice: inv.unspentPoints(s, bal) > 0 || inv.readyRewards(s, bal).length > 0,
       place: inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x)),
     });
   }

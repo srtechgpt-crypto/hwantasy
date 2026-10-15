@@ -1,4 +1,4 @@
-import { assertLevel, integer, itemDef } from './common.js';
+import { assertLevel, integer, isRecord, itemDef, EQUIP_SLOTS, NO_BONUS, slotOf, enchantRule } from './common.js';
 
 export function needExp(level, bal) {
   assertLevel(level, bal);
@@ -34,23 +34,49 @@ export function applyDeathPenalty(progress, bal) {
   // Loss is 5% of this level's required EXP, rounded down, never a level loss.
   return { level, exp: level === bal.progression.maxLevel ? 0 : Math.max(0, exp - Math.floor(needExp(level, bal) * bal.progression.deathLoss)) };
 }
-export function playerStats(level, equip, bal) {
+// 8차 보너스 점수: pointEvery 레벨마다 1점(L40 → 8점)
+export const bonusPoints = (level, bal) => Math.floor(level / bal.stats.pointEvery);
+export function validBonus(bonus) {
+  return isRecord(bonus) && ['str', 'dex', 'con'].every(k => integer(bonus[k])) && Object.keys(bonus).length === 3;
+}
+// 힘·민첩·체력(자동 + 보너스). 자동 = base + floor((L−1)·num/den)
+export function attributes(level, bonus, bal) {
   assertLevel(level, bal);
-  if (!equip || !('weapon' in equip) || !('armor' in equip)) throw new TypeError('장비 정보가 필요합니다');
-  function resolve(item, kind) {
-    if (item === null) return null;
+  if (!validBonus(bonus)) throw new RangeError('보너스 능력치가 올바르지 않습니다');
+  const st = bal.stats;
+  const auto = ([num, den]) => st.base + Math.floor(((level - 1) * num) / den);
+  return { str: auto(st.str) + st.pointValue * bonus.str, dex: auto(st.dex) + st.pointValue * bonus.dex, con: auto(st.con) + st.pointValue * bonus.con };
+}
+// 8차: 능력치 하나로 고정. equip = {칸: 가방 아이템|null}(빠진 칸은 비어 있음), bonus = {str,dex,con}.
+// 반환: maxHp, dmgBonus(힘 + 장갑 피해), def(레벨·체력 + 모든 방어구 방어·강화 — 전투에서 한 번만 뺌), hitBonus(%p, 민첩 + 장갑),
+// attackMs, regenPerTick·regenMs, weapon{min,max,enchant}, gear(장비 합), str·dex·con, points
+export function playerStats(level, equip, bal, bonus = NO_BONUS) {
+  assertLevel(level, bal);
+  if (!isRecord(equip)) throw new TypeError('장비 정보가 필요합니다');
+  const gear = { def: 0, hp: 0, hit: 0, dmg: 0, regen: 0 };
+  let weapon = null;
+  for (const slot of EQUIP_SLOTS) {
+    const item = equip[slot];
+    if (item === null || item === undefined) continue;
     const def = itemDef(item?.id, bal);
-    if (def?.kind !== kind || !integer(item.enchant, 0, bal.enchant[kind].max)) throw new RangeError('장비가 올바르지 않습니다');
-    return { ...def, enchant: item.enchant };
+    if (slotOf(def) !== slot || !integer(item.enchant, 0, enchantRule(def, bal).max)) throw new RangeError('장비가 올바르지 않습니다');
+    if (def.kind === 'weapon') { weapon = { min: def.min, max: def.max, enchant: item.enchant }; continue; }
+    gear.def += (def.def ?? 0) + item.enchant;
+    gear.hp += def.hp ?? 0; gear.hit += def.hit ?? 0; gear.dmg += def.dmg ?? 0; gear.regen += def.regen ?? 0;
   }
-  const w = resolve(equip.weapon, 'weapon');
-  const a = resolve(equip.armor, 'armor');
-  const k = bal.knight;
+  const a = attributes(level, bonus, bal);
+  const k = bal.knight, st = bal.stats;
+  const str = a.str - st.base, dex = a.dex - st.base, con = a.con - st.base;
   return {
-    maxHp: k.baseHp + k.hpPerLevel * (level - 1),
-    atkBonus: Math.floor(level / k.atkDivisor),
-    def: Math.floor(level / k.defDivisor),
-    weapon: { min: w?.min ?? bal.combat.bareMin, max: w?.max ?? bal.combat.bareMax, enchant: w?.enchant ?? 0 },
-    armor: { def: a?.def ?? 0, enchant: a?.enchant ?? 0 },
+    ...a, points: bonusPoints(level, bal),
+    maxHp: k.baseHp + k.hpPerLevel * (level - 1) + st.hpPerCon * con + gear.hp,
+    dmgBonus: Math.max(Math.floor(level / k.atkDivisor), str) + gear.dmg,
+    def: Math.floor(level / k.defDivisor) + Math.floor(con / st.conPerDef) + gear.def,
+    hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit,
+    attackMs: Math.max(st.minAttackMs, Math.round(k.attackMs * (1 - st.atkMsPerDex * dex))),
+    regenPerTick: k.regenBase + Math.floor(level / k.regenDivisor) + Math.floor(con / st.conPerRegen) + gear.regen,
+    regenMs: k.regenMs,
+    weapon: weapon ?? { min: bal.combat.bareMin, max: bal.combat.bareMax, enchant: 0 },
+    gear,
   };
 }

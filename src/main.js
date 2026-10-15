@@ -70,6 +70,8 @@ function startGame(save, isNew) {
 
 // ---------- 메뉴 ----------
 $('btnBag').onclick = () => { if (G.started && !G.pending) G.ui.open('bag'); };
+// 8차 [내 정보]: 장비 9칸·능력치·레벨 보상
+$('btnInfo').onclick = () => { if (G.started && !G.pending) G.ui.open('me'); };
 $('btnMap').onclick = () => { if (G.started && !G.pending) G.ui.open('map'); };
 $('btnMenu').onclick = () => {
   $('menu').hidden = false; $('ioBox').hidden = true; G.pause.add('menu');

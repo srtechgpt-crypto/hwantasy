@@ -3,10 +3,9 @@
 import bal from '../../data/balance.js';
 import * as inv from '../domain/inventory.js';
 import { enchantInfo, tryEnchant } from '../domain/enchant.js';
-import { playerStats } from '../domain/progression.js';
-import { itemDef } from '../domain/common.js';
+import { itemDef, isGearDef, slotOf, EQUIP_SLOTS } from '../domain/common.js';
 import { compareGear, compareDetail } from '../domain/compare.js';
-import { validate } from '../domain/save.js';
+import { validate, statsOf } from '../domain/save.js';
 import estimate from '../../data/estimate.js';
 import { drawWorldMap, regionAtRatio } from './worldmap.js';
 import { REGIONS, mapIdAt } from '../../data/maps.js';
@@ -17,18 +16,24 @@ import { savePrefs } from './prefs.js';
 const $ = (id) => document.getElementById(id);
 const won = (n) => n.toLocaleString('ko-KR');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const isGear = (id) => ['weapon', 'armor'].includes(itemDef(id, bal)?.kind);
+const isGear = (id) => isGearDef(itemDef(id, bal));
+// 8차: 장착 칸 이름(장비 9칸)
+const SLOT_NAMES = { weapon: '무기', armor: '갑옷', helm: '투구', shirt: '티셔츠', cloak: '망토', gloves: '장갑', belt: '벨트', pants: '바지', boots: '부츠' };
+// 인형 배치(3×3): 망토 투구 장갑 / 무기 갑옷 티셔츠 / 벨트 바지 부츠
+const DOLL = ['cloak', 'helm', 'gloves', 'weapon', 'armor', 'shirt', 'belt', 'pants', 'boots'];
+// 빈 칸에 흐리게 보여 줄 그림
+const GHOST = { weapon: 'woodSword', armor: 'clothArmor', helm: 'helm1', shirt: 'shirt1', cloak: 'cloak1', gloves: 'gloves1', belt: 'belt1', pants: 'pants1', boots: 'boots1' };
 const icon = (id, cls = '') => `<img class="ic ${cls}" src="assets/icons/${id}.png" alt="">`;
 const itemName = (it) => `${it.enchant ? `+${it.enchant} ` : ''}${itemDef(it.id, bal)?.name ?? it.id}`;
-const equipped = (s, uid) => s.equip.weapon === uid || s.equip.armor === uid;
+const equipped = (s, uid) => Object.values(s.equip).includes(uid);
 // 6차: 지금 낀 같은 종류 장비보다 좋으면 초록 ▲, 나쁘면 빨강 ▼(같거나 장비가 아니면 없음)
 // 상세 칸 한 줄: "지금 장비보다 평균 공격 +2.5 ▲"
 const cmpLine = (s, id, enchant = 0) => {
   const c = compareDetail(s, id, enchant, bal);
   if (!c) return '';
-  const what = c.kind === 'weapon' ? '평균 공격' : '방어';
+  const what = c.kind === 'weapon' ? '평균 공격' : c.slot === 'armor' ? '방어' : '장비 점수';
   const n = Math.round(Math.abs(c.diff) * 10) / 10;
-  if (!c.worn) return `<p class="cmpline up">▲ 지금 ${c.kind === 'weapon' ? '무기' : '갑옷'}를 안 끼고 있음</p>`;
+  if (!c.worn) return `<p class="cmpline up">▲ 지금 ${josa(SLOT_NAMES[c.slot], '을/를')} 안 끼고 있음</p>`;
   return c.dir === 'same' ? `<p class="cmpline">지금 장비와 ${what} 같음</p>`
     : `<p class="cmpline ${c.dir}">${c.dir === 'up' ? '▲' : '▼'} 지금 장비보다 ${what} ${c.dir === 'up' ? '+' : '−'}${n}</p>`;
 };
@@ -44,6 +49,7 @@ const SHOP_GOODS = {
 const TITLES = {
   bag: ['가방', 'weaponScroll'], shop: ['잡화상 노인', 'potion'], smith: ['대장장이', 'ironSword'],
   bank: ['창고지기', 'armorScroll'], tele: ['순간이동 마법사', 'returnScroll'], rates: ['배율', 'rates'], map: ['지도', 'map'],
+  me: ['내 정보', 'helm3'],
 };
 const TABS = {
   bag: [['items', '가방'], ['enchant', '강화']],
@@ -52,6 +58,8 @@ const TABS = {
   bank: [['bank', '맡기기·찾기']],
   tele: [['tele', '목적지']],
   rates: [['rates', '배율 고르기']],
+  // 8차 내 정보: 장비 9칸 · 능력치(보너스 점수) · 레벨 보상
+  me: [['gear', '장비'], ['stats', '능력치'], ['reward', '보상']],
   // 6차 큰 지도: [전체] + 지역마다 한 탭(지역 이름은 짧게)
   map: [['all', '전체'], ...REGIONS.map((r) => [r.id, r.name.split(' ').pop()])],
 };
@@ -89,7 +97,7 @@ export function initWindows() {
     if (!G.save || G.pending) return;
     // 지도는 지금 있는 지역 탭으로 연다
     if (kind === 'map' && !opts.tab && G.scene?.knight) opts = { ...opts, tab: mapIdAt(G.scene.knight.x) };
-    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, qtyFresh: true, confirm: null, busy: false, fx: null, junk: null };
+    cur = { kind, tab: opts.tab ?? TABS[kind][0][0], sel: null, buyId: null, qty: 1, qtyFresh: true, confirm: null, busy: false, fx: null, junk: null, slot: null, draft: null, confirmReset: false };
     if (kind === 'rates') { cur.orig = { ...G.save.rates }; cur.draft = { ...G.save.rates }; }
     G.pause.add('window');
     G.scene?.releaseInput();
@@ -131,7 +139,13 @@ export function initWindows() {
       ? TABS[cur.kind].map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
       : '';
     $('winGold').textContent = won(s.player.gold);
-    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates }[cur.tab];
+    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, gear: viewGear, stats: viewStats, reward: viewReward }[cur.tab];
+    // 탭 이름 옆 ! (남은 보너스 점수·받을 보상)
+    if (cur.kind === 'me') {
+      for (const [id, on] of [['stats', inv.unspentPoints(s, bal) > 0], ['reward', inv.readyRewards(s, bal).length > 0]]) {
+        $('winTabs').querySelector(`[data-tab="${id}"]`)?.classList.toggle('notice', on);
+      }
+    }
     $('winBody').innerHTML = body(s);
     $('winBody').dataset.view = cur.kind === 'map' ? 'map' : cur.tab;
     if (cur.kind === 'map') paintMap();
@@ -208,21 +222,29 @@ export function initWindows() {
     return `<div class="grid g${where}">${cells.join('')}</div>`;
   }
 
+  // 8차: 공격 = 무기 + 강화 + 피해 보너스(힘·장갑), 방어 = 레벨·체력 + 모든 방어구
+  const atkRange = (st) => { const add = st.weapon.enchant * bal.combat.weaponEnchantDamage + st.dmgBonus; return `${st.weapon.min + add}~${st.weapon.max + add}`; };
   function statsLine(s) {
-    const w = s.bag.find((i) => i.uid === s.equip.weapon) ?? null, a = s.bag.find((i) => i.uid === s.equip.armor) ?? null;
-    const st = playerStats(s.player.level, { weapon: w, armor: a }, bal);
-    const add = st.weapon.enchant * bal.combat.weaponEnchantDamage + st.atkBonus;
-    return `<div class="stats"><span>공격 <b>${st.weapon.min + add}~${st.weapon.max + add}</b></span><span>방어 <b>${st.armor.def + st.armor.enchant + st.def}</b></span><span>체력 <b>${Math.ceil(s.player.hp)}/${st.maxHp}</b></span><span>가방 <b>${s.bag.length}/${bal.inventory.bagSlots}</b></span></div>`;
+    const st = statsOf(s, bal);
+    return `<div class="stats"><span>공격 <b>${atkRange(st)}</b></span><span>방어 <b>${st.def}</b></span><span>체력 <b>${Math.ceil(s.player.hp)}/${st.maxHp}</b></span><span>가방 <b>${s.bag.length}/${bal.inventory.bagSlots}</b></span></div>`;
   }
 
   function itemInfo(it) {
     const d = itemDef(it.id, bal);
     if (d.kind === 'weapon') return `공격 ${d.min}~${d.max}${it.enchant ? ` (+${it.enchant * bal.combat.weaponEnchantDamage})` : ''}`;
-    if (d.kind === 'armor') return `방어 ${d.def}${it.enchant ? ` (+${it.enchant})` : ''}`;
-    if (d.id === 'potion') return `체력 +${d.heal}`;
+    if (d.kind === 'armor') {
+      const parts = [];
+      if (d.def || it.enchant) parts.push(`방어 ${d.def}${it.enchant ? ` (+${it.enchant})` : ''}`);
+      if (d.hp) parts.push(`최대 체력 +${d.hp}`);
+      if (d.hit) parts.push(`명중 +${d.hit}%`);
+      if (d.dmg) parts.push(`피해 +${d.dmg}`);
+      if (d.regen) parts.push(`회복 +${d.regen}`);
+      return `${SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}`;
+    }
+    if (d.heal) return `체력 +${d.heal}`;
     if (d.id === 'returnScroll') return '읽으면 바람 마을로 돌아갑니다';
     if (d.id === 'weaponScroll') return '무기를 강화합니다';
-    if (d.id === 'armorScroll') return '갑옷을 강화합니다';
+    if (d.id === 'armorScroll') return '갑옷과 투구·망토 등 부위 장비를 강화합니다';
     return '';
   }
 
@@ -253,7 +275,7 @@ export function initWindows() {
         <div class="btns">${gear ? (eq ? '<button type="button" class="act" data-act="unequip">벗기</button>' : '<button type="button" class="act primary" data-act="equip">장착</button>') : ''}
         ${gear ? '<button type="button" class="act" data-act="goEnchant">강화</button>' : ''}
         ${it.id === 'returnScroll' ? '<p class="hint">귀환은 오른쪽 아래 [귀환] 버튼으로 읽습니다.</p>' : ''}
-        ${it.id === 'potion' ? '<p class="hint">물약은 [물약] 버튼으로 마십니다.</p>' : ''}</div></div>`;
+        ${itemDef(it.id, bal).heal ? `<button type="button" class="act" data-act="drink" data-id="${it.id}">마시기</button><p class="hint">[물약] 버튼은 모자란 체력에 맞는 물약을 골라 마십니다.</p>` : ''}</div></div>`;
     }
     return `${statsLine(s)}<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s)}<div class="side">${side}</div></div>`;
   }
@@ -265,7 +287,7 @@ export function initWindows() {
     if (!cur.sel || !gear.some((g) => g.uid === cur.sel.uid)) cur.sel = { where: 'bag', uid: (gear.find((g) => equipped(s, g.uid)) ?? gear[0]).uid };
     const it = selected(s);
     const info = enchantInfo(it, s.rates, bal);
-    const scrollId = bal.enchant[info.kind].scrollId;
+    const scrollId = info.scrollId;
     const scrolls = inv.countItem(s, scrollId);
     const list = gear.map((g) => `<button type="button" class="row-item ${g.uid === it.uid ? 'on' : ''}" data-act="sel" data-where="bag" data-uid="${g.uid}">${icon(g.id)}<span>${esc(itemName(g))}</span>${equipped(s, g.uid) ? '<em>장착</em>' : ''}</button>`).join('');
     let center;
@@ -287,9 +309,14 @@ export function initWindows() {
     return `<div class="split ench-split"><div class="list">${list}</div><div class="side">${center}</div></div>`;
   }
 
-  // 상점 사기
+  // 상점 사기(8차: 대장장이는 부위 탭으로 나눠 보여 준다)
   function viewBuy(s) {
-    const goods = SHOP_GOODS[cur.kind];
+    let goods = SHOP_GOODS[cur.kind], chips = '';
+    if (cur.kind === 'smith') {
+      cur.slot = cur.slot ?? 'weapon';
+      goods = goods.filter((id) => slotOf(itemDef(id, bal)) === cur.slot);
+      chips = `<div class="chips">${EQUIP_SLOTS.map((sl) => `<button type="button" class="chip ${cur.slot === sl ? 'on' : ''}" data-act="slotf" data-slot="${sl}">${SLOT_NAMES[sl]}</button>`).join('')}</div>`;
+    }
     if (!cur.buyId || !goods.includes(cur.buyId)) cur.buyId = goods[0];
     const rows = goods.map((id) => {
       const d = itemDef(id, bal);
@@ -303,7 +330,85 @@ export function initWindows() {
       <p class="sum">${won(qty)}개 · <b>${won(d.price * qty)}원</b></p>
       <div class="btns"><button type="button" class="act primary" data-act="buy" ${max < 1 ? 'disabled' : ''}>사기</button></div>
       ${max < 1 ? `<p class="hint">${s.player.gold < d.price ? '돈이 부족합니다' : '가방에 자리가 없습니다'}</p>` : ''}</div>`;
-    return `${statsLine(s)}<div class="split"><div class="list">${rows}</div><div class="side">${side}</div></div>`;
+    return `${statsLine(s)}${chips}<div class="split"><div class="list">${rows}</div><div class="side">${side}</div></div>`;
+  }
+
+  // ---------- 8차 내 정보 ----------
+  // 장비: 인형 모양 9칸. 칸을 누르면 오른쪽에 지금 장비와 가방 속 같은 부위 장비 목록
+  function viewGear(s) {
+    cur.slot = cur.slot ?? 'weapon';
+    const cells = DOLL.map((sl) => {
+      const it = s.bag.find((i) => i.uid === s.equip[sl]);
+      const spare = s.bag.some((i) => !equipped(s, i.uid) && slotOf(itemDef(i.id, bal)) === sl && compareGear(s, i.id, i.enchant ?? 0, bal) === 'up');
+      return `<button type="button" class="slot ${cur.slot === sl ? 'on' : ''} ${it ? '' : 'none'}" data-act="slot" data-slot="${sl}">
+        ${it ? icon(it.id) : icon(GHOST[sl], 'ghost')}${it?.enchant ? `<span class="e">+${it.enchant}</span>` : ''}${spare ? '<span class="cmp up">▲</span>' : ''}
+        <small>${SLOT_NAMES[sl]}</small></button>`;
+    }).join('');
+    const worn = s.bag.find((i) => i.uid === s.equip[cur.slot]);
+    const spares = s.bag.filter((i) => !equipped(s, i.uid) && slotOf(itemDef(i.id, bal)) === cur.slot);
+    const list = spares.length ? spares.map((i) => `<div class="row-item">${icon(i.id)}<span>${esc(itemName(i))}${cmpMark(s, i.id, i.enchant ?? 0)}<br><small>${itemInfo(i)}</small></span>
+      <button type="button" class="act primary" data-act="equipuid" data-uid="${i.uid}">장착</button></div>`).join('')
+      : `<p class="hint">가방에 다른 ${josa(SLOT_NAMES[cur.slot], '이/가')} 없습니다. 대장장이에서 살 수 있습니다.</p>`;
+    const side = `<div class="detail"><h3>${SLOT_NAMES[cur.slot]}</h3>
+      ${worn ? `<div class="wornrow">${icon(worn.id, 'big')}<div><b>${esc(itemName(worn))}</b><p>${itemInfo(worn)}</p>
+        <button type="button" class="act" data-act="unequipslot" data-slot="${cur.slot}">벗기</button></div></div>` : '<p class="hint">비어 있습니다.</p>'}
+      <h4>가방 속 ${SLOT_NAMES[cur.slot]}</h4><div class="list">${list}</div></div>`;
+    return `${statsLine(s)}<div class="split"><div class="doll">${cells}</div><div class="side">${side}</div></div>`;
+  }
+
+  // 능력치: 힘·민첩·체력 + 보너스 점수 나누기(확정 전 미리 보기) + 마을에서 다시 나누기
+  const STAT_ROWS = [
+    ['str', '힘', '피해가 올라 빨리 잡습니다 (추천)'],
+    ['dex', '민첩', '명중과 공격 속도가 오릅니다'],
+    ['con', '체력', '최대 체력·회복·방어가 올라 오래 버팁니다(사냥은 느려짐)'],
+  ];
+  function viewStats(s) {
+    const draft = cur.draft ?? { str: 0, dex: 0, con: 0 };
+    const used = draft.str + draft.dex + draft.con, left = inv.unspentPoints(s, bal) - used;
+    const now = statsOf(s, bal);
+    const prev = statsOf({ ...s, player: { ...s.player, bonus: { str: s.player.bonus.str + draft.str, dex: s.player.bonus.dex + draft.dex, con: s.player.bonus.con + draft.con } } }, bal);
+    const arrow = (a, b, unit = '') => (a === b ? `<b>${a}${unit}</b>` : `<b>${a}${unit}</b> → <b class="gold-t">${b}${unit}</b>`);
+    const rows = STAT_ROWS.map(([k, name, desc]) => `<div class="statrow"><span class="sname">${name}</span>${arrow(now[k], prev[k])}
+      <small>보너스 ${s.player.bonus[k]}${draft[k] ? ` +${draft[k]}` : ''}</small>
+      <button type="button" class="rbtn" data-act="bonus" data-k="${k}" ${left > 0 && !cur.busy ? '' : 'disabled'} aria-label="${name} 올리기">+</button>
+      <span class="sdesc">${desc}</span></div>`).join('');
+    const pv = bal.stats.pointValue;
+    const here = G.scene?.region === 'town';
+    const spent = s.player.bonus.str + s.player.bonus.dex + s.player.bonus.con;
+    const cost = inv.resetCost(s, bal);
+    const next = Math.ceil((s.player.level + 1) / bal.stats.pointEvery) * bal.stats.pointEvery;
+    return `<div class="statbox"><div>
+        <p class="pts">남은 점수 <b class="${left > 0 ? 'gold-t' : ''}">${left}</b>${next <= bal.progression.maxLevel ? ` · 다음 점수 Lv ${next}` : ''}</p>
+        ${used ? `<div class="btns"><button type="button" class="act primary" data-act="bonusok" ${cur.busy ? 'disabled' : ''}>확정</button><button type="button" class="act" data-act="bonusundo">되돌리기</button></div>
+          <p class="hint">확정하면 바꿀 수 없습니다(마을에서 돈을 내고 다시 나눌 수 있음).</p>` : ''}
+        ${rows}
+        <p class="sub-t fine-t">레벨이 오르면 힘·민첩·체력이 저절로 오르고, ${bal.stats.pointEvery}레벨마다 보너스 점수 1점(능력치 +${pv})을 받습니다.</p>
+      </div>
+      <div class="derived"><h4>지금 능력</h4>
+        <p>공격 ${arrow(atkRange(now), atkRange(prev))}</p><p>명중 보너스 ${arrow(now.hitBonus, prev.hitBonus, '%')}</p>
+        <p>공격 간격 ${arrow((now.attackMs / 1000).toFixed(2), (prev.attackMs / 1000).toFixed(2), '초')}</p>
+        <p>방어 ${arrow(now.def, prev.def)}</p><p>최대 체력 ${arrow(now.maxHp, prev.maxHp)}</p>
+        <p>회복 ${arrow(now.regenPerTick, prev.regenPerTick)} <small>/${now.regenMs / 1000}초</small></p>
+        ${spent ? (cur.confirmReset
+          ? `<div class="warnbox"><p><b class="gold-t">${won(cost)}원</b>을 내고 보너스 점수 ${spent}점을 모두 되돌립니다.</p>
+             <div class="btns"><button type="button" class="act danger" data-act="resetok" ${cur.busy ? 'disabled' : ''}>다시 나누기</button><button type="button" class="act" data-act="resetno">그만두기</button></div></div>`
+          : `<div class="btns"><button type="button" class="act" data-act="resetask" ${here && s.player.gold >= cost ? '' : 'disabled'}>다시 나누기 (${won(cost)}원)</button></div>
+             ${here ? (s.player.gold < cost ? '<p class="hint">돈이 부족합니다</p>' : '') : '<p class="hint">마을에서만 다시 나눌 수 있습니다</p>'}`) : ''}
+      </div></div>`;
+  }
+
+  // 레벨 보상: 레벨마다 한 줄(받음·받기·잠김)
+  function viewReward(s) {
+    const rows = (bal.levelRewards ?? []).map((r) => {
+      const st = inv.rewardState(s, r.level, bal);
+      const goods = r.items.map((g) => `<span class="rwitem">${icon(g.id)}${esc(itemDef(g.id, bal).name)}${g.count > 1 ? ` ×${g.count}` : ''}</span>`).join('')
+        + (r.gold ? `<span class="rwitem"><b class="coin"></b>${won(r.gold)}원</span>` : '');
+      const btn = st === 'claimed' ? '<em class="ok-t">받음</em>'
+        : st === 'ready' ? `<button type="button" class="act primary" data-act="claim" data-lv="${r.level}" ${cur.busy ? 'disabled' : ''}>받기</button>`
+          : `<em class="sub-t">Lv ${r.level}부터</em>`;
+      return `<div class="rwrow ${st}"><b class="rwlv">Lv ${r.level}</b><div class="rwgoods">${goods}</div>${btn}</div>`;
+    }).join('');
+    return `<p class="sub-t">레벨을 달성하면 한 번씩 받을 수 있습니다. 가방에 자리가 있어야 합니다(지금 ${s.bag.length}/${bal.inventory.bagSlots}).</p>${rows}`;
   }
 
   // 상점 팔기
@@ -406,7 +511,7 @@ export function initWindows() {
   $('winTabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act="tab"]');
     if (!b || !cur || cur.busy) return;
-    cur.tab = b.dataset.tab; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; msg('');
+    cur.tab = b.dataset.tab; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; cur.draft = null; cur.confirmReset = false; msg('');
     render();
   });
   $('winClose').addEventListener('click', close);
@@ -426,7 +531,53 @@ export function initWindows() {
       case 'qtyone': cur.qty = 1; cur.qtyFresh = true; break;
       case 'minitoggle': toggleMini(); return; // 다시 그리지 않음(스크롤 유지)
       case 'equip': deal(inv.equip(s, cur.sel.uid, bal), 'equip', { okText: '장착했습니다' }); return;
-      case 'unequip': deal(inv.unequip(s, itemDef(selected(s).id, bal).kind, bal), 'unequip', { okText: '벗었습니다' }); return;
+      case 'unequip': deal(inv.unequip(s, slotOf(itemDef(selected(s).id, bal)), bal), 'unequip', { okText: '벗었습니다' }); return;
+      // 8차
+      case 'slotf': cur.slot = d.slot; cur.buyId = null; cur.qty = 1; cur.qtyFresh = true; msg(''); break;
+      case 'slot': cur.slot = d.slot; msg(''); break;
+      case 'equipuid': deal(inv.equip(s, Number(d.uid), bal), 'equip', { okText: '장착했습니다' }); return;
+      case 'unequipslot': deal(inv.unequip(s, d.slot, bal), 'unequip', { okText: '벗었습니다' }); return;
+      // ⑦: [물약] 버튼과 같은 대기시간(창이 열려 게임 시계가 멈춰 있어도 연달아 못 마심)
+      case 'drink': {
+        if ((G.scene?.potionCd ?? 0) > 0) { msg('물약을 마신 지 얼마 안 됐습니다. 창을 닫고 잠시 뒤에 다시 마셔 주세요', true); return; }
+        const pd = itemDef(d.id, bal);
+        deal(inv.usePotion(s, bal, d.id), 'potion', { okText: `${pd.name}을 마셨습니다`, after: () => { if (G.scene) G.scene.potionCd = pd.cooldownMs / 1000; } });
+        return;
+      }
+      case 'bonus': {
+        const draft = cur.draft ?? { str: 0, dex: 0, con: 0 };
+        if (draft.str + draft.dex + draft.con < inv.unspentPoints(s, bal)) cur.draft = { ...draft, [d.k]: draft[d.k] + 1 };
+        msg(''); break;
+      }
+      case 'bonusundo': cur.draft = null; msg(''); break;
+      case 'bonusok': {
+        if (cur.busy || !cur.draft) return;
+        cur.busy = true;
+        const ok = deal(inv.allocateBonus(s, cur.draft, bal), 'bonus', { okText: '보너스 점수를 나눴습니다', after: () => { if (cur) { cur.busy = false; cur.draft = null; } G.scene?.refreshHud(true); } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      case 'resetask': cur.confirmReset = true; msg(''); break;
+      case 'resetno': cur.confirmReset = false; break;
+      case 'resetok': {
+        if (cur.busy) return;
+        cur.busy = true;
+        const here = { ...s, player: { ...s.player, ...G.scene.positionOf() } };
+        const ok = deal(inv.resetBonus(here, bal), 'bonusReset', { keepPosition: true, okText: '보너스 점수를 되돌렸습니다. 다시 나눠 주세요', after: () => { if (cur) { cur.busy = false; cur.confirmReset = false; cur.draft = null; } G.scene?.refreshHud(true); } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      case 'claim': {
+        if (cur.busy) return;
+        const lv = Number(d.lv), r = inv.rewardDef(lv, bal);
+        cur.busy = true;
+        const ok = deal(inv.claimReward(s, lv, bal), 'reward', {
+          okText: `${lv}레벨 보상을 받았습니다`,
+          after: () => { if (cur) cur.busy = false; hud.log(`<b style="color:#e0a63e">${lv}레벨 보상</b> · ${r.items.map((g) => `${itemDef(g.id, bal).name}${g.count > 1 ? ` ${g.count}개` : ''}`).join(', ')}${r.gold ? ` · ${won(r.gold)}원` : ''}`); G.scene?.refreshHud(true); },
+        });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
       case 'goEnchant': cur.tab = 'enchant'; cur.confirm = null; cur.fx = null; break;
       case 'buy': {
         const id = cur.buyId, d2 = itemDef(id, bal);
@@ -538,7 +689,7 @@ export function initWindows() {
   }
 
   // 저장 실패 → [그만두기]로 거래를 취소하면 창의 '처리 중'을 풀고 다시 그린다(취소 뒤 저장이 또 실패해도 창이 잠기지 않게)
-  function unbusy() { if (!cur) return; cur.busy = false; cur.junk = null; render(); }
+  function unbusy() { if (!cur) return; cur.busy = false; cur.junk = null; cur.confirmReset = false; render(); }
 
   return { open, close, unbusy, refresh: render, get isOpen() { return !!cur; } };
 }

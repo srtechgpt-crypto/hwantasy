@@ -26,7 +26,9 @@ const lines = [];
 let toastTimer = 0;
 
 export const hud = {
-  update({ level, hp, maxHp, expPct, gold, potions, scrolls, place, maxLevel }) {
+  update({ level, hp, maxHp, expPct, gold, potions, scrolls, place, maxLevel, notice = false }) {
+    // 8차: 보너스 점수·레벨 보상이 남으면 [정보] 버튼에 ! 표시
+    $('btnInfo').classList.toggle('notice', notice);
     $('hudLv').textContent = `Lv ${level}`;
     $('hudHp').textContent = `${Math.max(0, Math.ceil(hp))}/${maxHp}`;
     $('hudHpBar').style.width = `${Math.max(0, Math.min(100, (100 * hp) / maxHp))}%`;
