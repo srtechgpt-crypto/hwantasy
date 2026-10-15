@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "e22b4df3c93e";
+const VERSION = "d46aae7f9637";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -101,7 +101,7 @@ const FILES = {
   "assets/ult_sword.png": "0f63c5f80c169f8812fd6805ec39b71c382adce7794822e7117cdc534e783519",
   "assets/출처.txt": "038b87fb084bed371e079ef4c916ea14b03090efb267c048eb1d8c278432bba6",
   "data/balance.js": "1577a2029437be0d764c7a0a1e68e028c3fe1052d648dceac0d279958948c023",
-  "data/estimate.js": "43ed90f3ddd32e0691b19267c424c83ce7a5a3a3fb25ee13ec7ed6ba59c1f216",
+  "data/estimate.js": "3e60ba4d5597aa533cb8ca2a0899cbcc90cd23df85ed0d1fa113680dac50cf7d",
   "data/maps.js": "cc115eae67162b5bc2677b8f77338901ab0345679d5cd9e6a6a3f41aff9f1e5d",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
