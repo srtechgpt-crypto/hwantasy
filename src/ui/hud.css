@@ -331,7 +331,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .skbtns .act, .hbhelp .act { min-height: 32px; min-width: 84px; font-size: 13px; padding: 4px 10px; }
 
 /* 10차: 켜진 버프(상태줄) */
-.buffs { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+/* 2026-10-17: 버프 칸은 작은 지도 아래(지도를 숨기면 오른쪽 버튼 아래), 오른쪽 맞춤·넘치면 여러 줄 */
+.buffs { position: fixed; top: var(--buff-top, calc(env(safe-area-inset-top, 0px) + 46px)); right: calc(env(safe-area-inset-right, 0px) + 12px); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; align-items: center; max-width: 40vw; pointer-events: none; }
+.buffs.beside { right: var(--buff-right, 140px); flex-direction: column; align-items: flex-end; }
 .buffs[hidden] { display: none; }
 .buff { display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px 1px 2px; border: 1px solid #6a5a32; border-radius: 4px; background: #241c10cc; }
 .buff img { width: 16px; height: 16px; image-rendering: pixelated; }

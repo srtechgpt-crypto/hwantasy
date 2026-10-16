@@ -66,8 +66,24 @@ function placeUnderHud() {
   const st = document.documentElement.style;
   st.setProperty('--log-top', `${Math.round(L.bottom + 6)}px`);
   st.setProperty('--map-top', `${Math.round(R.bottom + 6)}px`);
+  // 버프 칸: 작은 지도가 보이면 그 아래, 숨겼으면 오른쪽 버튼 아래. 지도 크기가 바뀌면(지역·열고 닫기) 다시 부름
+  const mini = h.querySelector('.minimap');
+  if (mini && ro && !mini.dataset.watched) { mini.dataset.watched = '1'; ro.observe(mini); }
+  const M = mini?.getBoundingClientRect();
+  const B = $('hudBuffs');
+  B.classList.remove('beside');
+  st.setProperty('--buff-top', `${Math.round((M && M.height ? M.bottom : R.bottom) + 6)}px`);
+  // 세로가 짧아 아래 단축 칸에 닿으면 작은 지도 왼쪽 옆에 세로로 놓는다
+  const bar = $('hotbar')?.getBoundingClientRect();
+  if (!B.hidden && M && M.height && bar && bar.height && B.getBoundingClientRect().bottom > bar.top - 4) {
+    B.classList.add('beside');
+    st.setProperty('--buff-top', `${Math.round(M.top)}px`);
+    st.setProperty('--buff-right', `${Math.round(innerWidth - M.left + 6)}px`);
+  }
 }
-if ('ResizeObserver' in window) { const ro = new ResizeObserver(placeUnderHud); ro.observe($('hud')); document.querySelectorAll('#hud .hud-left, #hud .hud-right').forEach((e) => ro.observe(e)); }
+const ro = 'ResizeObserver' in window ? new ResizeObserver(() => placeUnderHud()) : null;
+if (ro) { ro.observe($('hud')); document.querySelectorAll('#hud .hud-left, #hud .hud-right').forEach((e) => ro.observe(e)); }
+hud.relayout = placeUnderHud;
 addEventListener('resize', placeUnderHud);
 addEventListener('orientationchange', () => setTimeout(placeUnderHud, 300));
 

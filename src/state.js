@@ -96,8 +96,10 @@ export const hud = {
     if (!el) return;
     const text = (ms) => (ms >= 60000 ? `${Math.floor(ms / 60000)}분` : `${Math.max(1, Math.ceil(ms / 1000))}초`);
     const html = list.map((b) => `<span class="buff ${b.ms < 60000 ? 'low' : ''}" title="${b.name}"><img src="assets/icons/${b.icon}.png" alt=""><em>${text(b.ms)}</em></span>`).join('');
-    if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+    const was = el.hidden, changed = el.dataset.html !== html;
+    if (changed) { el.dataset.html = html; el.innerHTML = html; }
     el.hidden = !list.length;
+    if (changed || was !== el.hidden) hud.relayout?.(); // 개수·글자 폭이 바뀌면 작은 지도 아래/옆 자리 다시 판정(main.js)
   },
   setAuto(on) {
     $('btnAuto').classList.toggle('on', on);

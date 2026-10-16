@@ -187,6 +187,7 @@ export class WorldScene extends Phaser.Scene {
       onTap: () => { if (this.canAct()) G.ui.open('map'); }, // 위쪽 [지도] 버튼과 같은 창
     });
     this.minimap.setOpen(this.prefs.mini);
+    hud.relayout?.(); // 버프 칸을 새로 생긴 작은 지도 아래로(⑦ 2026-10-17)
     this.miniT = 0;
     this.refreshZoomButtons();
     G.onSceneReady?.();
