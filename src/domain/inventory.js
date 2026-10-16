@@ -4,6 +4,7 @@ import { addExp, bonusPoints, validBonus } from './progression.js';
 import { TELEPORTS } from '../../data/maps.js';
 import { validate, statsOf, settleHp } from './save.js';
 import { applyBuffItem } from './buffs.js';
+import { morphInto } from './morph.js';
 
 function transaction(save, bal, run) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
@@ -93,6 +94,43 @@ export function buy(save, id, count, bal) {
     if (insert(next, 'bag', id, count, bal)) return fail('가방이 가득 찼습니다');
     next.player.gold -= cost;
     return { ok: true, save: next };
+  });
+}
+// 11차 장바구니: 여러 줄을 한 거래로 산다(같은 id는 합침). 하나라도 안 되면 아무것도 사지 않는다(전부 아니면 아무것도)
+export function buyMany(save, lines, bal) {
+  if (!Array.isArray(lines) || !lines.length) return fail('장바구니가 비어 있습니다');
+  const want = new Map();
+  for (const line of lines) {
+    const def = itemDef(line?.id, bal);
+    if (!def?.shop || !integer(line.count, 1)) return fail('장바구니에 살 수 없는 줄이 있습니다');
+    want.set(line.id, (want.get(line.id) ?? 0) + line.count);
+  }
+  let cost = 0;
+  for (const [id, count] of want) cost += itemDef(id, bal).price * count;
+  if (!integer(cost)) return fail('금액이 너무 큽니다');
+  return transaction(save, bal, next => {
+    if (next.player.gold < cost) return fail(`돈이 부족합니다(필요 ${cost.toLocaleString('ko-KR')}원)`);
+    for (const [id, count] of want) if (insert(next, 'bag', id, count, bal)) return fail(`가방이 가득 차서 ${itemDef(id, bal).name}을(를) 다 넣을 수 없습니다`);
+    next.player.gold -= cost;
+    return { ok: true, save: next, cost, kinds: want.size };
+  });
+}
+// 11차 여러 개 팔기: [{uid, count}] 한 거래. uid 중복·장착 중·수량 초과면 아무것도 팔지 않는다
+export function sellMany(save, lines, bal) {
+  if (!Array.isArray(lines) || !lines.length) return fail('고른 물건이 없습니다');
+  if (lines.some(l => !integer(l?.uid, 1) || !integer(l?.count, 1)) || new Set(lines.map(l => l.uid)).size !== lines.length) return fail('고른 목록이 올바르지 않습니다');
+  return transaction(save, bal, next => {
+    let gold = 0;
+    for (const { uid, count } of lines) {
+      const item = next.bag.find(it => it.uid === uid);
+      if (!item || item.count < count) return fail('고른 물건 수량이 바뀌었습니다. 다시 골라 주세요');
+      if (Object.values(next.equip).includes(uid)) return fail('장착 중인 장비는 팔 수 없습니다');
+      gold += sellPrice(item.id, bal) * count;
+    }
+    if (!integer(next.player.gold + gold)) return fail('돈 한도를 초과했습니다');
+    for (const { uid, count } of lines) take(next, uid, count);
+    next.player.gold += gold;
+    return { ok: true, save: next, gold, count: lines.length };
   });
 }
 // 개당 판매가를 먼저 버린 뒤 수량을 곱한다(화면 표시와 실제 입금이 같은 함수)
@@ -274,6 +312,10 @@ export function useReturnScroll(save, bal) {
 // 10차 버프 아이템(힘·날쌘·수호 물약, 경험치 두루마리): 1개 쓰고 남은 시간에 더함(상한)
 export function useBuff(save, itemId, bal) {
   return transaction(save, bal, next => applyBuffItem(next, itemId, bal, take));
+}
+// 11차 변신: 주문서 1장 + 무작위 능력치를 한 거래로(난수 오류·레벨 부족이면 아무것도 안 바뀜)
+export function useMorph(save, id, rng, bal) {
+  return transaction(save, bal, next => morphInto(next, id, rng, bal, take));
 }
 // 10차 사냥터 이동 주문서: 어디서든(보스 방·시전 중 여부는 화면이 먼저 막음) 고른 사냥터 입구로, 주문서 1장(돈 없음)
 export function useHuntScroll(save, destId, bal) {

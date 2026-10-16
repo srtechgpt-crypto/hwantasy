@@ -71,6 +71,11 @@ const consumables = [
   { id: 'guardPotion', name: '수호 물약', kind: 'consumable', price: 150, buff: 'guard', shop: true, sellRate: 0.25 },
   { id: 'expScroll', name: '경험치 두루마리', kind: 'consumable', price: 800, buff: 'exp', shop: true, sellRate: 0.25 },
   { id: 'huntScroll', name: '사냥터 이동 주문서', kind: 'consumable', price: 30, shop: true, sellRate: 0.25 },
+  // 11차: 고급 강화(+1~3 무작위, bal.blessed)·강화 하락(−1, 안 사라짐)·변신(bal.morphs)
+  { id: 'weaponScrollB', name: '고급 무기 강화 주문서', kind: 'consumable', price: 900, shop: true, sellRate: 0.25 },
+  { id: 'armorScrollB', name: '고급 방어 강화 주문서', kind: 'consumable', price: 600, shop: true, sellRate: 0.25 },
+  { id: 'downScroll', name: '강화 하락 주문서', kind: 'consumable', price: 60, shop: true, sellRate: 0.25 },
+  { id: 'morphScroll', name: '변신 주문서', kind: 'consumable', price: 300, shop: true, sellRate: 0.25 },
 ];
 // 10차 희귀 장비: 등급(1~4) 있는 무기·큰 갑옷·부위의 '빛나는' 판(별도 id `<원래>_r`, 상점 없음, 값 2배 — ⑤ #20 판매 돈이 너무 크지 않게).
 // 무기 최소·최대 ×1.25 올림, 방어구는 0 아닌 수치 ×1.5 올림 + 최대 체력 +5×등급. 강화 규칙·부위·세트 등급은 원래와 같다
@@ -98,6 +103,8 @@ const normalDrops = (scroll, scrollA, weapon, armor, gearChance, potions, tier, 
   { id: armor, count: 1, chance: gearChance },
   { pool: TYPE_POOLS[tier - 1], count: 1, chance: typeChance },
   { pool: RARE_POOLS[tier - 1], count: 1, chance: 0.002 },
+  // 11차: 고급 강화 주문서(폐광·성터만)
+  ...(tier >= 3 ? [{ id: 'weaponScrollB', count: 1, chance: 0.002 }, { id: 'armorScrollB', count: 1, chance: 0.002 }] : []),
 ];
 const FIELD_DROPS = normalDrops(0.01, 0.015, 'ironSword', 'leatherArmor', 0.005, [['potion', 0.06]], 1, 0.0015, 0.005);
 const FOREST_DROPS = normalDrops(0.02, 0.025, 'steelSword', 'chainArmor', 0.01, [['potion', 0.04], ['potionMid', 0.02]], 2, 0.002, 0.008);
@@ -125,6 +132,8 @@ const rows = [
     { id: 'deepSword', count: 1, chance: 0.15 },
     { id: 'plateArmor', count: 1, chance: 0.15 },
     { pool: RARE_POOLS[2], count: 1, chance: 0.3 },
+    { id: 'weaponScrollB', count: 1, chance: 0.2 },
+    { id: 'armorScrollB', count: 1, chance: 0.2 },
   ]],
   // 4차: 망자의 성터(권장 31~40). 10차: 미스릴 세트·희귀·새 무기로 30→40이 빨라져 경험치 ×0.93(1102·1598·2344·3380 → 아래 값)
   ['wisp', '떠도는 넋', 30, 940, 48, 40, 1025, 120, 'ruin', false, RUIN_DROPS],
@@ -137,6 +146,8 @@ const rows = [
     { id: 'wraithSword', count: 1, chance: 0.1 },
     { id: 'wraithArmor', count: 1, chance: 0.1 },
     { pool: RARE_POOLS[3], count: 1, chance: 0.3 },
+    { id: 'weaponScrollB', count: 1, chance: 0.2 },
+    { id: 'armorScrollB', count: 1, chance: 0.2 },
   ]],
 ];
 // 5차(대표님 의견 '돈이 너무 없다'): 일반 몬스터 돈 평균 × 2.5(반올림). 보스는 그대로
@@ -224,7 +235,7 @@ export default {
     { id: 'p_will', name: '불굴', level: 38, lowHpReduce: 0.2, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -20%' },
   ],
   // 9차 단축 칸에 넣을 수 있는 물건
-  hotbarItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll'],
+  hotbarItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll'],
   // 10차 버프(쓰는 아이템). 남은 시간은 저장(save.buffs, 게임 시계 ms). 또 쓰면 남은 시간에 더함, 상한 = 시간 × buffStackMax
   buffs: [
     { id: 'power', item: 'powerPotion', name: '힘', durationMs: 600000, dmgPct: 15, desc: '10분 동안 주는 피해 +15%' },
@@ -233,6 +244,20 @@ export default {
     { id: 'exp', item: 'expScroll', name: '경험치', durationMs: 1800000, expPct: 50, desc: '30분 동안 처치 경험치 +50%' },
   ],
   buffStackMax: 3,
+  // 11차 변신(변신 주문서 → 목록에서 고름). attackPct = 공격 간격 %(−는 빠름), movePct = 이동 속도 %, dmgPct·critPct는 더함.
+  // 변신할 때 무작위 능력치 1개(morphRolls 네 가지 중 하나를 같은 확률로, 값도 범위 안 같은 확률). 겉모습은 색(tint)·빛·이름표
+  morphDurationMs: 1200000,
+  morphRolls: { str: [2, 6], dex: [2, 6], crit: [2, 5], hit: [3, 8] },
+  morphs: [
+    { id: 'skeleton', name: '해골 전사', level: 1, attackPct: -5, movePct: 5, tint: 0xe8e4d8, glow: 0xd8d4c0, desc: '공격 간격 −5% · 이동 +5%' },
+    { id: 'werewolf', name: '늑대인간', level: 10, attackPct: -5, movePct: 25, tint: 0xc8a070, glow: 0xe0b060, desc: '이동 +25% · 공격 간격 −5%' },
+    { id: 'orc', name: '오크 투사', level: 15, attackPct: -10, movePct: 5, dmgPct: 5, tint: 0x90c070, glow: 0x80d060, desc: '공격 간격 −10% · 이동 +5% · 피해 +5%' },
+    { id: 'darkelf', name: '다크엘프', level: 22, attackPct: -12, movePct: 10, critPct: 3, tint: 0xb090e0, glow: 0xa070ff, desc: '공격 간격 −12% · 이동 +10% · 치명 +3%' },
+    { id: 'deathknight', name: '데스나이트', level: 30, attackPct: -15, movePct: 10, dmgPct: 8, tint: 0xff8080, glow: 0xff4040, desc: '공격 간격 −15% · 이동 +10% · 피해 +8%' },
+    { id: 'wraithking', name: '망령 기사왕', level: 38, attackPct: -18, movePct: 15, dmgPct: 10, tint: 0x9fd8ff, glow: 0x60b0ff, desc: '공격 간격 −18% · 이동 +15% · 피해 +10%' },
+  ],
+  // 11차 고급 강화: k단계 확률(1·2·3), 도착 단계가 안전을 넘으면 그 단계의 일반 확률로 성공/파괴
+  blessed: { weights: [50, 30, 20], weaponScroll: 'weaponScrollB', armorScroll: 'armorScrollB' },
   // 10차 세트 효과: 7부위(큰 갑옷 제외) 중 같은 등급(희귀 포함) 장착 수 3·5·7에 단계별로 누적
   sets: [
     { tier: 1, name: '모험가', stages: [[3, { hp: 10 }], [5, { def: 1 }], [7, { dmg: 1, crit: 2 }]] },

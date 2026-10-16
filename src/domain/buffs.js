@@ -21,7 +21,8 @@ export function applyBuffs(stats, buffs, level, bal) {
     const d = buffDef(id, bal);
     if (!d || !(ms > 0)) continue;
     if (d.dmgPct) out.dmgPct = (out.dmgPct ?? 0) + d.dmgPct;
-    if (d.speedPct) out.attackMs = Math.max(out.minAttackMs ?? bal.stats.minAttackMs, Math.round(((out.attackMsRaw ?? out.attackMs) * (100 + d.speedPct)) / 100));
+    // 11차(⑤ #10): 간격 배율은 atkMul 하나에 곱해 두고(변신도 같은 곳), 자르기 전 간격 × atkMul을 마지막에 한 번 자름
+    if (d.speedPct) { out.atkMul = (out.atkMul ?? 1) * (100 + d.speedPct) / 100; out.attackMs = Math.max(out.minAttackMs ?? bal.stats.minAttackMs, Math.round((out.attackMsRaw ?? out.attackMs) * out.atkMul)); }
     if (d.defBase !== undefined) out.def += d.defBase + Math.floor(level / d.defPerLevels);
   }
   return out;

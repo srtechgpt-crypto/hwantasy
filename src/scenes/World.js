@@ -13,7 +13,8 @@ import { findPath } from '../domain/path.js';
 import { learnedSkills, skillDef, incomingReduce, counterDamage } from '../domain/skills.js';
 import { placeLearned, autoUse, PAGE_SIZE } from '../domain/hotbar.js';
 import { createSkillFx } from '../ui/skillfx.js';
-import { compareGear } from '../domain/compare.js';
+import { compareGear, loadoutStats } from '../domain/compare.js';
+import { morphDef, tickMorph, rollText } from '../domain/morph.js';
 import { statsOf } from '../domain/save.js';
 import { applyBuffs, buffedExp, tickBuffs, buffDef, buffOfItem } from '../domain/buffs.js';
 import { createJoystick } from '../ui/joystick.js';
@@ -39,7 +40,7 @@ const UNREACH_MS = 20000;     // 5차: 길이 없는 몬스터는 이 시간 동
 const ROAM_MS = 8000;         // 5차: 돌아다니기 목표 하나에 쓰는 최대 시간
 const NUDGE = 6;              // 5차: 조이스틱이 모서리에 걸리면 옆으로 이만큼(px) 안에 빈 곳을 찾아 미끄러진다
 // 9차: 단축 칸 물건 짧은 이름, 방어 스킬 글자 색, 8방향 → 각도(대지 가르기 방향)
-const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', returnScroll: '귀환', powerPotion: '힘', hastePotion: '날쌤', guardPotion: '수호', expScroll: '경험', huntScroll: '이동' };
+const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', returnScroll: '귀환', powerPotion: '힘', hastePotion: '날쌤', guardPotion: '수호', expScroll: '경험', huntScroll: '이동', morphScroll: '변신' };
 const DEF_COLOR = { block: '#9fd8ff', heal: '#7dff9a', guard: '#9fd8ff', counter: '#ff7a6a' };
 const FACE_ANGLE = { right: 0, downRight: Math.PI / 4, down: Math.PI / 2, downLeft: (3 * Math.PI) / 4, left: Math.PI, upLeft: (-3 * Math.PI) / 4, up: -Math.PI / 2, upRight: -Math.PI / 4 };
 const MAX_FLOATS = 30; // ⑤ #19: 떠오르는 글자 상한
@@ -537,7 +538,8 @@ export class WorldScene extends Phaser.Scene {
     const v = this.joy.vector();
     let walking = false;
     if (v.active && (v.x || v.y)) {
-      walking = this.moveJoy(v.x * SPEED * dt, v.y * SPEED * dt);
+      const sp = this.moveSpeed();
+      walking = this.moveJoy(v.x * sp * dt, v.y * sp * dt);
       this.face = dirOf(v.x, v.y); this.dir8 = dir8Of(v.x, v.y);
     } else if (G.auto && !v.active && now >= this.autoResumeAt) {
       walking = this.runAuto(dt);
@@ -563,7 +565,10 @@ export class WorldScene extends Phaser.Scene {
     if (G.pending) return;
     this.updateSkillFx(now);
     this.tickBuffTime(dtMs);
+    this.tickMorphTime(dtMs);
     this.autoBuffs();
+    this.autoMorph();
+    this.morphLook();
     this.updateGroundItems(now);
     this.updateTalk();
     this.updateRegion();
@@ -642,7 +647,67 @@ export class WorldScene extends Phaser.Scene {
   // ---------- 기사 행동 ----------
   stats() {
     // 8차: 장비 9칸 + 보너스 능력치(공격 간격·명중·재생 포함). 10차: 켜진 버프(힘·날쌤·수호)를 매번 새로 더함(캐시 없음, ⑤ #25)
-    return applyBuffs(statsOf(G.save, bal), G.save.buffs, G.save.player.level, bal);
+    // 11차: compare.loadoutStats 하나로(변신 무작위 힘·민첩 → 버프 → 변신 효과, 간격은 atkMul 한 길) — 창·비교와 같은 값
+    return loadoutStats(G.save, bal);
+  }
+  // 11차 이동 속도(변신): 기본 SPEED × (100 + movePct)/100
+  moveSpeed() { const d = G.save.morph?.cur ? morphDef(G.save.morph.cur.id, bal) : null; return SPEED * (100 + (d?.movePct ?? 0)) / 100; }
+
+  // ---------- 11차 변신 ----------
+  tickMorphTime(dtMs) {
+    const m = G.save.morph;
+    if (!m?.cur) { this.morphAcc = 0; return; }
+    this.morphAcc = (this.morphAcc ?? 0) + dtMs;
+    const whole = Math.floor(this.morphAcc);
+    if (whole <= 0) return;
+    this.morphAcc -= whole;
+    const r = tickMorph(m, whole);
+    G.save.morph = r.morph;
+    if (r.ended) {
+      hud.log(`<span style="color:#9fd8ff">${morphDef(m.cur.id, bal)?.name ?? '변신'}이(가) 풀렸습니다</span>`);
+      this.morphEndedAt = this.gt; this.morphLook(true);
+      G.persist('morphEnd');
+    }
+  }
+  // 겉모습: 색(tint)·발밑 빛·머리 위 이름표(그림은 그대로 — 대표님 선택 2026-10-16)
+  morphLook(force = false) {
+    const c = G.save?.morph?.cur, d = c ? morphDef(c.id, bal) : null, key = d?.id ?? '';
+    if (!force && key === this.morphKey) return;
+    this.morphKey = key;
+    if (d) this.hero.setTint(d.tint); else this.hero.clearTint();
+    if (!this.morphLabel) {
+      this.morphLabel = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '7px', fontStyle: 'bold', color: '#ffe08a', stroke: '#000', strokeThickness: 2, resolution: 4 }).setOrigin(0.5).setDepth(999);
+      this.morphRing = this.add.graphics().setDepth(9);
+    }
+    this.morphLabel.setText(d ? d.name : '').setVisible(!!d);
+    this.morphRing.clear();
+    if (d) { this.morphRing.fillStyle(d.glow, 0.28).fillEllipse(0, 0, 22, 9).lineStyle(1, d.glow, 0.8).strokeEllipse(0, 0, 22, 9); }
+    this.morphRing.setVisible(!!d);
+  }
+  restoreTint() { const c = G.save?.morph?.cur, d = c ? morphDef(c.id, bal) : null; if (d) this.hero.setTint(d.tint); else this.hero.clearTint(); }
+  // 변신 저장이 성공한 뒤(창에서 부름): 연기·번쩍·이름
+  morphFx(roll) {
+    this.morphLook(true);
+    const d = morphDef(G.save.morph.cur.id, bal);
+    this.smoke(this.knight.x, this.knight.y - 6, 1);
+    this.cameras.main.flash(200, 255, 236, 180);
+    this.floatText(this.knight.x, this.knight.y - 24, `${d.name}!`, '#ffd36a', 1500);
+    hud.log(`<b style="color:#ffd36a">${d.name}(으)로 변신</b> — ${d.desc} · 덤 ${rollText(roll)} · 20분`);
+  }
+  // 자동 사냥 중 변신이 시간이 다 돼 풀렸고, 단축 칸에 변신 주문서가 있으면 마지막 변신으로 다시(⑤ #13: 직접 풀었으면 안 함, 3초에 한 번만 시도)
+  autoMorph() {
+    const m = G.save.morph;
+    if (!G.auto || m?.cur || !m?.last || !m.auto || !this.canAct() || G.save.player.hp <= 0 || this.casting) return;
+    if (mapIdAt(this.knight.x) === 'town' || inBossRoom(this.knight.x, this.knight.y)) return;
+    if (this.gt < (this.autoMorphAt ?? 0)) return;
+    this.autoMorphAt = this.gt + 3000;
+    if (!(G.save.hotbar?.slots ?? []).some((e) => e?.t === 'item' && e.id === 'morphScroll') || countOf(G.save, 'morphScroll') <= 0) return;
+    const res = inv.useMorph(G.save, m.last, this.rng, bal);
+    if (!res.ok) { if (!this.autoMorphWarned) { hud.log(`<span style="color:#9fd8ff">자동 변신 안 됨 — ${res.reason}</span>`); this.autoMorphWarned = true; } return; }
+    this.autoMorphWarned = false;
+    G.save = res.save;
+    this.morphFx(res.roll);
+    G.persist('morph');
   }
 
   // ---------- 10차 버프 ----------
@@ -695,6 +760,7 @@ export class WorldScene extends Phaser.Scene {
     if (!d) return false;
     if (id === 'returnScroll') return this.useReturn('직접');
     if (id === 'huntScroll') return this.openHuntScroll();
+    if (id === 'morphScroll') { if (!this.canAct()) return false; G.ui.open('morph'); return true; }
     if (d.buff) return this.useBuffItem(id, true);
     return this.drinkPotion(true, id);
   }
@@ -919,7 +985,7 @@ export class WorldScene extends Phaser.Scene {
     const c = this.casting;
     if (!c || this.gt < c.at) return;
     this.casting = null;
-    this.hero.clearTint();
+    this.restoreTint();
     const ok = c.gen === this.castGen && this.canAct() && G.save.player.hp > 0 && mapIdAt(this.knight.x) === c.map;
     if (!ok) { this.cancelCasting(c, true); return; }
     const def = skillDef('ult', bal), r = def.radiusTiles * TILE;
@@ -940,7 +1006,7 @@ export class WorldScene extends Phaser.Scene {
     if (c === this.casting) this.casting = null;
     if (refund) { this.skillAt.ult = 0; this.attackCd = 0; }
     if (c.sword) { this.tweens.killTweensOf(c.sword); c.sword.destroy(); }
-    this.hero?.clearTint();
+    if (this.hero) this.restoreTint();
     if (G.save && this.playing) this.refreshSkills(true);
   }
 
@@ -1276,7 +1342,7 @@ export class WorldScene extends Phaser.Scene {
     const p = G.save.player;
     p.hp -= dmg;
     this.hero.setTint(0xff7766);
-    this.time.delayedCall(120, () => this.hero.clearTint());
+    this.time.delayedCall(120, () => this.restoreTint());
     this.floatText(this.knight.x, this.knight.y - 16, String(dmg), color);
     if (p.hp <= 0) { this.die(); return true; }
     return false;
@@ -1493,7 +1559,7 @@ export class WorldScene extends Phaser.Scene {
     } else this.route = null;
     const dx = tx - this.knight.x, dy = ty - this.knight.y, d = Math.hypot(dx, dy) || 1;
     this.face = dirOf(dx0, dy0); this.dir8 = dir8Of(dx, dy);
-    const step = Math.min(d, SPEED * dt);
+    const step = Math.min(d, this.moveSpeed() * dt);
     return this.moveBy(this.knight, (dx / d) * step, (dy / d) * step);
   }
 
@@ -1660,6 +1726,7 @@ export class WorldScene extends Phaser.Scene {
     else if (this.face === 'right') this.facingLeft = false;
     const x = this.snap(k.x + this.lunge.x), y = this.snap(k.y + 2 + this.lunge.y);
     this.hero.setPosition(x, y).setDepth(10 + k.y / 1000);
+    if (this.morphLabel?.visible) { this.morphLabel.setPosition(x, y - 34); this.morphRing.setPosition(x, y); }
     this.cameraTarget.setPosition(this.snap(k.x), this.snap(k.y - 8));
   }
 

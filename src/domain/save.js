@@ -3,6 +3,7 @@ import { clone, finite, integer, isRecord, itemDef, EQUIP_SLOTS, isGearDef, slot
 import { needExp, playerStats, bonusPoints, validBonus } from './progression.js';
 import { defaultHotbar, validHotbar } from './hotbar.js';
 import { validBuffs } from './buffs.js';
+import { validMorph, emptyMorph } from './morph.js';
 
 // 저장 형식 버전. 2 = 2026-10-13 경험치 곡선 변경(초반 빠르게). 1 → 2는 '현재 레벨에서 채운 비율'로 변환한다.
 // 3 = 2026-10-14 4차: 보스 두 마리(boss → bosses 맵), 최대 레벨 40. 2 → 3은 v2 규칙으로 전부 검사한 뒤에만 바꾼다.
@@ -11,14 +12,16 @@ import { validBuffs } from './buffs.js';
 // 5 = 2026-10-15 9차: save.hotbar(단축 칸 12칸·자동 사용·seen). 4 → 5는 지금 규칙으로 검사한 뒤 기본 배치만 더한다
 //     (9차 패시브는 최대 체력을 늘리기만 하므로 v4 기록의 hp는 지금 규칙으로도 범위 안)
 // 6 = 2026-10-16 10차: save.buffs(버프 남은 시간). 아이템은 늘기만(무기 계열·희귀·쓰는 아이템). 5 → 6은 v5 규칙으로 검사한 뒤 buffs {}만 더한다
-export const SAVE_VERSION = 6;
+// 7 = 2026-10-16 11차: save.morph(변신 상태). 아이템은 늘기만(고급·하락·변신 주문서). 6 → 7은 v6 고정 규칙으로 검사한 뒤 morph 기본값만 더한다
+export const SAVE_VERSION = 7;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
 export const V3_BACKUP_KEY = 'hwantasy.v3backup';
 export const V4_BACKUP_KEY = 'hwantasy.v4backup';
 export const V5_BACKUP_KEY = 'hwantasy.v5backup';
-const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY };
+export const V6_BACKUP_KEY = 'hwantasy.v6backup';
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 // 버전 1 때의 경험치 공식(고정): round(72 × L^2.15). 변환 전 v1 검사·비율 계산에만 쓴다
@@ -60,12 +63,24 @@ const V4_PROGRESSION = { coefficient: 155 };
 const V5_PROGRESSION = { coefficient: 175 };
 const V5_HOTBAR_ITEMS = ['potion', 'potionMid', 'potionHigh', 'returnScroll'];
 export const isPhase10Item = def => !!def.rare || (def.kind === 'weapon' && (def.type ?? 'sword') !== 'sword') || !!def.buff || def.id === 'huntScroll';
+// 11차 새 아이템(⑤ #2): v6 이하 기록에는 있을 수 없다
+const PHASE11_ITEMS = ['weaponScrollB', 'armorScrollB', 'downScroll', 'morphScroll'];
+export const isPhase11Item = def => PHASE11_ITEMS.includes(def.id);
+// v6(10차 게시본) 고정 규칙: 경험치 계수 176, 11차 아이템 없음, 단축 칸 물건 9종
+const V6_PROGRESSION = { coefficient: 176 };
+const V6_HOTBAR_ITEMS = ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll'];
+function v6Bal(bal) {
+  const keep = list => list.filter(def => !isPhase11Item(def));
+  return { ...bal, weapons: keep(bal.weapons), armors: keep(bal.armors), consumables: keep(bal.consumables), hotbarItems: V6_HOTBAR_ITEMS,
+    progression: { ...bal.progression, ...V6_PROGRESSION } };
+}
 function v5Bal(bal) {
-  const keep = list => list.filter(def => !isPhase10Item(def));
+  const keep = list => list.filter(def => !isPhase10Item(def) && !isPhase11Item(def));
   return { ...bal, weapons: keep(bal.weapons), armors: keep(bal.armors), consumables: keep(bal.consumables), hotbarItems: V5_HOTBAR_ITEMS,
     progression: { ...bal.progression, ...V5_PROGRESSION } };
 }
 export const balFor = (bal, version) => (version === SAVE_VERSION ? bal
+  : version === 6 ? v6Bal(bal)
   : version === 5 ? v5Bal(bal)
   : version === 4 ? { ...v5Bal(bal), progression: { ...bal.progression, ...V4_PROGRESSION } } : legacyBal(bal, version));
 
@@ -89,6 +104,7 @@ export function newGame(bal) {
   save.player.hp = statsOf(save, bal).maxHp;
   save.hotbar = defaultHotbar(1, bal);
   save.buffs = {};
+  save.morph = emptyMorph();
   return save;
 }
 // 8차: 저장의 장착 장비·보너스로 계산한 능력치(v4 형식만)
@@ -170,6 +186,8 @@ export function validate(save, bal, version = SAVE_VERSION) {
   else if ('hotbar' in save) bad('옛 버전 기록에 단축 칸이 있습니다');
   if (version >= 6) { if (!validBuffs(save.buffs, bal)) bad('버프 기록이 올바르지 않습니다'); }
   else if ('buffs' in save) bad('옛 버전 기록에 버프가 있습니다');
+  if (version >= 7) { if (!validMorph(save.morph, bal)) bad('변신 기록이 올바르지 않습니다'); }
+  else if ('morph' in save) bad('옛 버전 기록에 변신이 있습니다');
   const bossTime = at => at === null || integer(at);
   if (version < 3) {
     if (!isRecord(save.boss) || !bossTime(save.boss.defeatedAt)) bad('보스 처치 시각이 올바르지 않습니다');
@@ -258,7 +276,23 @@ function v5to6(save, bal) {
   next.version = 6;
   next.buffs = {};
   // 경험치 계수가 v5(175)와 다르면 지금 레벨에서 채운 비율을 지킨다(같으면 그대로)
-  const old = balFor(bal, 5), p = next.player;
+  // 11차: 목표는 v6 고정 규칙(다음 단계 v6→v7 검사를 통과하고 거기서 다시 비율 변환)
+  const old = balFor(bal, 5), v6 = balFor(bal, 6), p = next.player;
+  if (p.level < v6.progression.maxLevel && needExp(p.level, old) !== needExp(p.level, v6)) {
+    const need = needExp(p.level, v6);
+    p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
+  } else if (p.level >= v6.progression.maxLevel) p.exp = 0;
+  return settleHp(next, v6);
+}
+// 6→7(⑤ #1): v6 고정 규칙으로 전부 검사한 뒤 변신 기본값만 더한다(경험치 계수가 바뀌었으면 비율 변환)
+function v6to7(save, bal) {
+  const old = balFor(bal, 6);
+  const check = validate(save, old, 6);
+  if (!check.ok) throw new TypeError(`버전 6 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 7;
+  next.morph = emptyMorph();
+  const p = next.player;
   if (p.level < bal.progression.maxLevel && needExp(p.level, old) !== needExp(p.level, bal)) {
     const need = needExp(p.level, bal);
     p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
@@ -268,13 +302,14 @@ function v5to6(save, bal) {
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   if (save.version === SAVE_VERSION) return clone(save);
-  if (![1, 2, 3, 4, 5].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
+  if (![1, 2, 3, 4, 5, 6].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
   let next = save;
   if (next.version === 1) next = v1to2(next, bal);
   if (next.version === 2) next = v2to3(next, bal);
   if (next.version === 3) next = v3to4(next, bal);
   if (next.version === 4) next = v4to5(next, bal);
-  return v5to6(next, bal);
+  if (next.version === 5) next = v5to6(next, bal);
+  return v6to7(next, bal);
 }
 // 지원하는 버전보다 새 기록(앱을 옛 버전으로 되돌린 경우 등)인지
 function futureVersion(raw) {

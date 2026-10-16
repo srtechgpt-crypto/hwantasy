@@ -66,7 +66,8 @@ export function activeSets(defs, bal) {
     return { tier: set.tier, name: set.name, count: n, stage, next, fx };
   });
 }
-export function playerStats(level, equip, bal, bonus = NO_BONUS) {
+// 11차: extra = { str, dex } 변신 무작위 능력치(원래 능력치에 그대로 더함 — 보너스 점수가 아니라 ×pointValue 안 함)
+export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null) {
   assertLevel(level, bal);
   if (!isRecord(equip)) throw new TypeError('장비 정보가 필요합니다');
   const gear = { def: 0, hp: 0, hit: 0, dmg: 0, regen: 0 };
@@ -89,6 +90,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS) {
   // 10차 무기 계열: 최종 피해 %(dmgPct), 공격 간격 %(speedPct — 최소 간격도 같은 비율), 치명·명중 %p
   const speed = 100 + (wdef?.speedPct ?? 0);
   const a = attributes(level, bonus, bal);
+  if (extra) { a.str += extra.str ?? 0; a.dex += extra.dex ?? 0; }
   const k = bal.knight, st = bal.stats, pm = passiveMods(level, bal);
   const str = a.str - st.base, dex = a.dex - st.base, con = a.con - st.base;
   const hpBase = k.baseHp + k.hpPerLevel * (level - 1) + st.hpPerCon * con + gear.hp;
