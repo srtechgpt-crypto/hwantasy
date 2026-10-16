@@ -24,18 +24,28 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .hud { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 6px); left: calc(env(safe-area-inset-left, 0px) + 10px); right: calc(env(safe-area-inset-right, 0px) + 10px); display: flex; justify-content: space-between; align-items: center; gap: 8px; pointer-events: none; }
 .hud-left, .hud-right { display: flex; align-items: center; gap: 8px; }
 .hud-right { pointer-events: auto; }
+/* 2026-10-16 폴드7: 버프 칸이 붙자 줄이 넘쳐 글자가 세로로 쪼개짐('지/도'·'1/분'·Lv 숫자 숨음).
+   글자 칸은 줄어들지 않게(nowrap) 하고, 모자라면 장소 이름(말줄임)·막대가 함께 줄고 버프는 자리에 따라 통째로 아랫줄로 내려간다(순서 보장 아님 — 화면시험_상태줄로 확인).
+   알림·작은 지도는 main.js placeUnderHud가 상태줄 실제 아래로 옮긴다. */
+.hud { align-items: flex-start; }
+.hud-left { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+.hud-core { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.hud-right { flex: 0 1 auto; min-width: 0; }
+.lv, .gold, .small, .buff { flex: none; white-space: nowrap; }
 .lv { font-family: var(--font-display); font-weight: 700; color: var(--gold); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; font-size: 14px; }
-.meter { position: relative; width: 132px; height: 18px; background: rgba(0,0,0,.55); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.meter { position: relative; flex: 0 1 120px; min-width: 70px; height: 18px; background: rgba(0,0,0,.55); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
 .meter i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--hp); }
-.meter.exp { width: 104px; }
+.meter.exp { flex-basis: 96px; min-width: 62px; }
 .meter.exp i { background: var(--exp); opacity: .85; }
-.meter span { position: relative; display: block; text-align: center; font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px #000; }
+.meter span { position: relative; display: block; text-align: center; font-size: 11px; line-height: 16px; white-space: nowrap; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px #000; }
 .gold { display: flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .coin { width: 10px; height: 10px; border-radius: 50%; background: var(--gold); box-shadow: inset -2px -2px 0 rgba(0,0,0,.25); }
-.place { font-family: var(--font-display); font-size: 13px; color: var(--muted); text-shadow: 0 1px 2px #000; }
+.place { font-family: var(--font-display); font-size: 13px; color: var(--muted); text-shadow: 0 1px 2px #000; flex: 0 1 auto; min-width: 0; max-width: 7em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: center; }
+.hud-right .small { align-self: center; }
+@media (max-width: 820px) { .hud .small { padding: 6px 9px; } .hud, .hud-left, .hud-core, .hud-right { gap: 6px; } }
 .small { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; font-size: 13px; }
 
-.log { position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); top: calc(env(safe-area-inset-top, 0px) + 34px); font-size: 12px; line-height: 1.55; max-width: 46vw; pointer-events: none; text-shadow: 0 1px 2px #000, 0 0 2px #000; }
+.log { position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); top: var(--log-top, calc(env(safe-area-inset-top, 0px) + 34px)); font-size: 12px; line-height: 1.55; max-width: 46vw; overflow-wrap: anywhere; pointer-events: none; text-shadow: 0 1px 2px #000, 0 0 2px #000; }
 .log div { opacity: .95; }
 .log div.old { opacity: .55; }
 .toast { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--gold); border-radius: 6px; padding: 8px 16px; font-size: 14px; pointer-events: none; text-align: center; max-width: 80vw; z-index: 20; } /* 2026-10-16: 메뉴·창(.screen z5·#win z6) 위로 */
@@ -193,7 +203,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .fx.up, .fx.broke { animation: none; } }
 
 /* 미니맵(오른쪽 위, 가방·메뉴 아래). 누르면 접기/펴기 */
-.minimap { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 46px); right: calc(env(safe-area-inset-right, 0px) + 12px); background: rgba(20,22,31,.78); border: 1px solid var(--line); border-radius: 6px; padding: 4px; pointer-events: auto; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.minimap { position: fixed; top: var(--map-top, calc(env(safe-area-inset-top, 0px) + 46px)); right: calc(env(safe-area-inset-right, 0px) + 12px); background: rgba(20,22,31,.78); border: 1px solid var(--line); border-radius: 6px; padding: 4px; pointer-events: auto; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
 .minimap canvas { display: block; image-rendering: pixelated; border-radius: 3px; }
 .minimap { cursor: pointer; }
 .minimap.closed { display: none; }
@@ -321,7 +331,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .skbtns .act, .hbhelp .act { min-height: 32px; min-width: 84px; font-size: 13px; padding: 4px 10px; }
 
 /* 10차: 켜진 버프(상태줄) */
-.buffs { display: inline-flex; gap: 4px; align-items: center; }
+.buffs { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
 .buffs[hidden] { display: none; }
 .buff { display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px 1px 2px; border: 1px solid #6a5a32; border-radius: 4px; background: #241c10cc; }
 .buff img { width: 16px; height: 16px; image-rendering: pixelated; }

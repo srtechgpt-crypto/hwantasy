@@ -57,11 +57,26 @@ $('btnNew').onclick = () => {
 $('btnNewNo').onclick = () => { $('newConfirm').hidden = true; $('titleButtons').hidden = false; };
 $('btnNewYes').onclick = () => startGame(saveMod.newGame(bal), true);
 
+// 2026-10-16: 상태줄이 두 줄이 되거나(버프가 아랫줄로) 화면이 바뀌면 알림은 왼쪽 묶음 아래, 작은 지도는 오른쪽 묶음 아래로
+function placeUnderHud() {
+  const h = $('hud');
+  if (h.hidden) return;
+  const L = h.querySelector('.hud-left').getBoundingClientRect(), R = h.querySelector('.hud-right').getBoundingClientRect();
+  if (!L.height) return;
+  const st = document.documentElement.style;
+  st.setProperty('--log-top', `${Math.round(L.bottom + 6)}px`);
+  st.setProperty('--map-top', `${Math.round(R.bottom + 6)}px`);
+}
+if ('ResizeObserver' in window) { const ro = new ResizeObserver(placeUnderHud); ro.observe($('hud')); document.querySelectorAll('#hud .hud-left, #hud .hud-right').forEach((e) => ro.observe(e)); }
+addEventListener('resize', placeUnderHud);
+addEventListener('orientationchange', () => setTimeout(placeUnderHud, 300));
+
 function startGame(save, isNew) {
   G.save = save;
   G.started = true;
   $('title').hidden = true;
   $('hud').hidden = $('pad').hidden = false;
+  placeUnderHud();
   G.pause.delete('title');
   if (isNew) G.persist('new');
   hud.rates(G.save.rates);

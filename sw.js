@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "4895c94a471f";
+const VERSION = "44422623fb40";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -183,7 +183,7 @@ const FILES = {
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
   "icons/icon-maskable-512.png": "d209bbef68bf9c836b7675a99c297b45d7ec2d55a4b75736f042870ddd8e567d",
-  "index.html": "9eb5cc599c4a5cb130214c7870f158ed90275793f55b91b05d83226d355895e8",
+  "index.html": "4115ab0b0169c17354dcf1a02f48ea0904bec9c7281d942b1251b1dad956c5b2",
   "manifest.webmanifest": "e52e09ae050d75862cd4048e27a0480f2a2e128b32557c4debb4160aa3809f8e",
   "src/domain/autohunt.js": "250bf3c18b42bb778322f712898a4174f2564a440fa0b621aa9ea1f9af708cc4",
   "src/domain/boss.js": "91dafb0d88f42a8995c02ae5051e652521bc732ccc0991a8dd009bdde616e599",
@@ -201,10 +201,10 @@ const FILES = {
   "src/domain/rng.js": "bc81a7f7bebb527ce7ac3bd95485b408897f0378a5ab6effca64446e84f2ac88",
   "src/domain/save.js": "64628ee02714ac8b07794318c75e18f7855ee1f470c560f2d820f7f8115b21c1",
   "src/domain/skills.js": "c25b3d1d34ea01c327e166a2d6abbe6a3e3045327a0c5f8249946f98ac8384b8",
-  "src/main.js": "485959fe7484ee551e2259cefa612954e23841353e857f4f5876d6d981000026",
+  "src/main.js": "1751ea320b57311ca219c3fa4116eecf7ff84412a74c4f6fcc12c426335999b9",
   "src/scenes/World.js": "b3883d64db53a9c4681df2b11acc0f405e4fee9ed86a0c2d95ab4d081662595a",
   "src/state.js": "9af679b92c921fb4588f521852dad3f5b4e297c4cb06384fabd03f9cb010beca",
-  "src/ui/hud.css": "5fca0ff7ef7710bd33636475332c921eaaedf35a912d5fbdc24546bf32ed8aaf",
+  "src/ui/hud.css": "2bcceb21d031b9b801cdd584c3754cac5748b56f797b4bd9f23c31363d48a7b7",
   "src/ui/joystick.js": "0e41ee1f5fe089271522647719d2efe3793a207d5799fe964cb628fb17fda602",
   "src/ui/minimap.js": "d9da5373661ac42925847fd7a625cb369f1aaa51048678ef0d2644b93a293caa",
   "src/ui/prefs.js": "07ed4ed989c9d6adc93639f9ee9a2776bc613f0acddbfd463457cb686d8ed9c8",
