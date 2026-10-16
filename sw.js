@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "1db9c75d8cfc";
+const VERSION = "58094ccd3e93";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -174,7 +174,7 @@ const FILES = {
   "assets/ult_sword.png": "0f63c5f80c169f8812fd6805ec39b71c382adce7794822e7117cdc534e783519",
   "assets/출처.txt": "a98814b7064d1c9728acbf7de1e80c03da8faf0b1c1bf635b8fd3a75ce59537b",
   "data/balance.js": "64d804fdc69059aedc6e28c3831280db28d492ac6971221324f21b8a19e948af",
-  "data/estimate.js": "9542c870c7aef75c44bb7f22d19bda1a46a9f0f8d557d02f0e9ee13cea806f39",
+  "data/estimate.js": "8fbea8f3e87bb05b1108f20ceb7615d6e7b0eaae3da5438b413ffe7c7d10b2d3",
   "data/maps.js": "cc115eae67162b5bc2677b8f77338901ab0345679d5cd9e6a6a3f41aff9f1e5d",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
@@ -187,7 +187,7 @@ const FILES = {
   "src/domain/combat.js": "487c84069c110834aeeb3dbda1e1cb228ea4a04945007122cf769b77d8243bd4",
   "src/domain/common.js": "83ba9325f16ab5ba5ea447f958152d14fbf4624dc5abca32d285dd9d523f6294",
   "src/domain/compare.js": "5ea79f2925084a5476e681c8946750e2dd39b8a7a558c48c3d0ed5705ffcfde0",
-  "src/domain/enchant.js": "87411943ee9d823df38735091d2835a334c4e3f231859fc4952d1f0497229c61",
+  "src/domain/enchant.js": "7ea4a50b878aa5ee829d6d0a6203e3e09fa8df7442d6ab05470d2202d3d9527c",
   "src/domain/hotbar.js": "8793696e53d1ee5e40dbc1ae46b7a85f7f9108755b8b4376787aa80d4979d446",
   "src/domain/inventory.js": "fb40054234637d8cbfee8c1bbce89eeba4c4422b0a2752eb192569e0c1beb915",
   "src/domain/path.js": "96e12b87b5e8843f0c38a03363cf4ab9ac8bc95fa3c166d668a65d0151ebc52f",
@@ -199,12 +199,12 @@ const FILES = {
   "src/main.js": "485959fe7484ee551e2259cefa612954e23841353e857f4f5876d6d981000026",
   "src/scenes/World.js": "674fa5e9e305d4dc592a12352f9cceec376c47561c6237ab25ff435b86b8acbb",
   "src/state.js": "9af679b92c921fb4588f521852dad3f5b4e297c4cb06384fabd03f9cb010beca",
-  "src/ui/hud.css": "9323b34fbbce4c9982463403174554cd6f1766b5192a9fbe7ff471b17b99b16a",
+  "src/ui/hud.css": "8d36eed9458358ce062cd905798ad05f86274c5839a82cd0fc4fbe1d761b679a",
   "src/ui/joystick.js": "0e41ee1f5fe089271522647719d2efe3793a207d5799fe964cb628fb17fda602",
   "src/ui/minimap.js": "d9da5373661ac42925847fd7a625cb369f1aaa51048678ef0d2644b93a293caa",
   "src/ui/prefs.js": "07ed4ed989c9d6adc93639f9ee9a2776bc613f0acddbfd463457cb686d8ed9c8",
   "src/ui/skillfx.js": "61e18be85fa38b398c81a913d067a519db5d5cbd325c3639aa242f51cc7a3fd5",
-  "src/ui/windows.js": "b8c81b9bec66bf1723cdb9646ec30e876f2e7246f2f9af7b7c79fb4ec44368b3",
+  "src/ui/windows.js": "ae364ae95cdcc4c793e4c522a7d5f1eac7becef302b97039ba3210f11ee2b577",
   "src/ui/worldmap.js": "41081b6e8d47b51e7319baf4a2a025fff96f0c80de0b88f2a29f2c6918abbdd9",
   "vendor/phaser.min.js": "e92ddef111ba42e92d316979c732311757093688ea1810591cb7aa2858eba7a7"
 };

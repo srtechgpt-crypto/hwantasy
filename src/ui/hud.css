@@ -335,3 +335,26 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .setbox b { color: #ffd36a; }
 .setbox .off { color: var(--muted); }
 .doll .setbox { grid-column: 1 / -1; margin-top: 4px; }
+
+/* 2026-10-16 아이템 설명 카드: 오른쪽 칸은 창 본문이 스크롤돼도 붙어 있고, 사기 화면은 [사기 | 설명] 2열 */
+.split > .side { position: sticky; top: 0; align-self: start; }
+.buyside { display: grid; grid-template-columns: minmax(180px, 230px) 1fr; gap: 12px; align-items: start; }
+.guide { padding: 8px 10px; border: 1px solid #5a4a2a; border-radius: 8px; background: #17130e; font-size: 12.5px; line-height: 1.45; min-width: 0; }
+.guide h4 { margin: 0 0 6px; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--gold); }
+.guide h4 .ic { width: 20px; height: 20px; }
+.guide dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; }
+.guide dt { color: var(--muted); white-space: nowrap; }
+.guide dd { margin: 0; color: var(--parch); }
+.side > .guide { margin-top: 8px; }
+@media (max-width: 760px) { .buyside { grid-template-columns: 1fr; } }
+/* ⑤ #8: 사기 화면은 목록만 스크롤 — 오른쪽 [사기]·설명은 그대로 보임. 좁은 창은 사기 부분과 설명을 위아래로 */
+.buysplit > .list { max-height: calc(100dvh - 210px); overflow-y: auto; padding-right: 2px; }
+.buyside .qtyhint { display: none; }
+@media (max-width: 860px) { .buyside { grid-template-columns: 1fr; } .buysplit > .side { max-height: calc(100dvh - 210px); overflow-y: auto; } }
+.buyside .guide { max-height: calc(100dvh - 230px); overflow-y: auto; }
+/* 한 번에 강화 */
+.batch { margin-top: 10px; padding: 8px 10px; border: 1px dashed #6a5a32; border-radius: 8px; display: grid; gap: 6px; }
+.batch h4 { margin: 0; font-size: 13px; color: var(--gold); }
+.btrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.btrow > span { color: var(--muted); font-size: 13px; }
+.btrow > b { min-width: 34px; text-align: center; font-size: 16px; }

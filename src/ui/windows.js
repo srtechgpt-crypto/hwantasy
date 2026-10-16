@@ -2,8 +2,8 @@
 // 모든 거래는 domain 함수로 새 save 후보를 만들고 G.commit으로 "저장에 성공했을 때만" 확정한다.
 import bal, { WEAPON_TYPES } from '../../data/balance.js';
 import * as inv from '../domain/inventory.js';
-import { enchantInfo, tryEnchant } from '../domain/enchant.js';
-import { itemDef, isGearDef, slotOf, EQUIP_SLOTS } from '../domain/common.js';
+import { enchantInfo, tryEnchant, enchantPlan, enchantTo } from '../domain/enchant.js';
+import { itemDef, isGearDef, slotOf, EQUIP_SLOTS, enchantRule } from '../domain/common.js';
 import { compareGear, compareDetail, loadoutStats } from '../domain/compare.js';
 import { validate, statsOf } from '../domain/save.js';
 import { activeSets } from '../domain/progression.js';
@@ -290,6 +290,103 @@ export function initWindows() {
       <p class="qtyhint">[+10]·[+100]은 누를 때마다 더해집니다(처음 누르면 그 수로)</p>`;
   }
 
+
+  // ---------- 2026-10-16 아이템 설명 카드(대표님 의견: 효과·기간·얼마나 오르는지) ----------
+  // 숫자는 모두 domain(loadoutStats·buffDef·enchantRule·sets)에서 — 문구만 여기
+  const sec = (ms) => `${(ms / 1000).toFixed(2)}초`;
+  const atkText = (st) => atkRange(st);
+  function guideRows(s, id, enchant = 0, uid = null) {
+    const d = itemDef(id, bal);
+    if (!d) return [];
+    const rows = [];
+    if (d.heal) {
+      rows.push(['효과', `체력을 <b>${d.heal}</b> 바로 채웁니다(최대 체력까지)`]);
+      rows.push(['기간', '<b>한 번</b> — 마시면 사라집니다']);
+      rows.push(['쓰는 법', `[물약] 버튼은 모자란 체력에 맞는 물약을 골라 마십니다. 마신 뒤 ${d.cooldownMs / 1000}초 뒤에 다시 마실 수 있습니다`]);
+      rows.push(['자동 사냥', `체력이 ${Math.round(bal.autohunt.potionHp * 100)}% 아래로 내려가면 저절로 마십니다`]);
+      return rows;
+    }
+    if (d.buff) {
+      const b = buffDef(d.buff, bal), lv = s.player.level;
+      const off = loadoutStats({ ...s, buffs: {} }, bal), on = loadoutStats({ ...s, buffs: { [b.id]: 1 } }, bal);
+      if (b.dmgPct) rows.push(['효과', `주는 피해 <b>+${b.dmgPct}%</b> (일반 공격·스킬·치명 모두) — 지금 공격 ${atkText(off)} → <b>${atkText(on)}</b>`]);
+      if (b.speedPct) rows.push(['효과', `공격 간격 <b>${b.speedPct}%</b> (더 빨리 벰) — 지금 ${sec(off.attackMs)} → <b>${sec(on.attackMs)}</b>${on.attackMs === off.attackMs ? ' <small>(이미 가장 빠른 간격이라 더 빨라지지 않음)</small>' : ''}`]);
+      if (b.defBase !== undefined) rows.push(['효과', `방어 <b>+${b.defBase + Math.floor(lv / b.defPerLevels)}</b> (3 + 레벨÷5, 지금 Lv ${lv}) — 방어 ${off.def} → <b>${on.def}</b>`]);
+      if (b.expPct) rows.push(['효과', `몬스터를 잡을 때 받는 경험치 <b>+${b.expPct}%</b> (보스 포함, 배율 적용 뒤)`]);
+      const capMs = b.durationMs * bal.buffStackMax, min = (ms) => `${Math.ceil(ms / 60000)}분`;
+      rows.push(['기간', `<b>${b.durationMs / 60000}분</b> 동안만 (영원하지 않음 — 사냥하는 게임 시간으로 줄어듦)`]);
+      rows.push(['겹쳐 쓰기', `또 쓰면 효과는 그대로이고 <b>남은 시간만</b> ${b.durationMs / 60000}분 늘어납니다(최대 ${capMs / 60000}분). 다른 버프와는 함께 켜집니다`]);
+      rows.push(['멈추는 때', '창·메뉴를 열어 둔 동안, 앱을 꺼 둔 동안은 시간이 줄지 않습니다. 쓰러져도 남습니다']);
+      rows.push(['쓰는 법', '가방에서 [쓰기], 또는 단축 칸에 넣고 누르기. <b>단축 칸에 두면 자동 사냥 중 효과가 끝날 때 저절로 씁니다</b>']);
+      // ⑤ #2: 이미 켜져 있으면 능력치는 더 오르지 않고 시간만 — 상한이면 쓸 수 없음
+      const left = s.buffs?.[b.id] ?? 0;
+      if (left >= capMs) rows.push(['지금', `<b class="bad-t">이미 최대 시간(${min(capMs)})이라 지금은 더 쓸 수 없습니다</b>`]);
+      else if (left > 0) rows.push(['지금', `켜져 있음 — 또 쓰면 남은 시간 ${min(left)} → <b>${min(Math.min(capMs, left + b.durationMs))}</b> (위 숫자는 효과가 없을 때와 비교)`]);
+      return rows;
+    }
+    if (d.id === 'returnScroll') {
+      return [['효과', '읽으면 바로 <b>바람 마을</b>로 돌아갑니다'], ['기간', '<b>한 번</b> — 읽으면 사라집니다'],
+        ['쓰는 법', '오른쪽 아래 [귀환] 버튼 또는 단축 칸'], ['자동 사냥', `체력이 ${Math.round(bal.autohunt.returnHp * 100)}% 아래이거나 물약이 떨어지면 저절로 읽습니다`]];
+    }
+    if (d.id === 'huntScroll') {
+      return [['효과', `어디서든 사냥터 입구(${bal.teleport.map((t) => t.name.replace(' 입구', '')).join('·')}) 중 골라 바로 갑니다`],
+        ['기간', '<b>한 번</b> — 갈 곳을 고르면 1장 사라집니다(목록만 열고 닫으면 안 씀)'], ['못 쓰는 곳', '보스 방 안, 필살기 쓰는 중, 쓰러졌을 때'],
+        ['쓰는 법', '가방에서 [읽기] 또는 단축 칸']];
+    }
+    if (d.id === 'weaponScroll' || d.id === 'armorScroll') {
+      const kinds = d.id === 'weaponScroll' ? [['무기', bal.enchant.weapon]] : [['큰 갑옷', bal.enchant.armor], ['투구·망토 등 부위', bal.enchant.part]];
+      rows.push(['효과', d.id === 'weaponScroll' ? `무기 강화 1단계마다 <b>공격 +${bal.combat.weaponEnchantDamage}</b>` : '갑옷·부위 강화 1단계마다 <b>방어 +1</b>']);
+      for (const [name, r] of kinds) {
+        const risky = r.riskyChances.map((c, i) => `+${r.safe + i + 1} ${Math.round(Math.min(1, c * s.rates.enchant) * 100)}%`).join(' · ');
+        rows.push([name, `+${r.safe}까지 <b>반드시 성공</b>, 그 뒤 ${risky} (최대 +${r.max}) — <b class="bad-t">위험 단계에서 실패하면 장비가 사라집니다</b>`]);
+      }
+      rows.push(['쓰는 법', '가방 → [강화] 탭 또는 대장장이 [강화]. 한 번에 1장']);
+      return rows;
+    }
+    if (isGearDef(d)) {
+      const slot = slotOf(d), cur = loadoutStats(s, bal), wearing = uid !== null && s.equip[slot] === uid;
+      // ⑤ #4: 지금 끼고 있는 그 장비면 비교 대신 '빼면'과 비교(같은 칸을 비운 상태)
+      const next = wearing ? cur : loadoutStats(s, bal, slot, { id, enchant, count: 1 });
+      const base = wearing ? loadoutStats(s, bal, slot, null) : cur;
+      const arrow = (a, b, unit = '') => (a === b ? `${a}${unit}` : `${a}${unit} → <b class="${b > a ? 'ok-t' : 'bad-t'}">${b}${unit}</b>`);
+      const arrowLow = (a, b) => (a === b ? sec(a) : `${sec(a)} → <b class="${b < a ? 'ok-t' : 'bad-t'}">${sec(b)}</b>`);
+      rows.push(['기간', '<b>끼고 있는 동안 계속</b>(영구) — 벗으면 효과가 빠집니다']);
+      if (d.kind === 'weapon') {
+        const t = TYPE_OF[d.type ?? 'sword'];
+        rows.push(['종류', `${t?.noun ?? '검'} — ${t?.desc ?? ''}${d.rare ? ' · <b class="rare-t">희귀</b>(같은 등급보다 공격 ×1.25)' : ''}`]);
+      }
+      const label = wearing ? '지금 끼고 있음' : s.bag.some((i) => i.uid === s.equip[slot]) ? '바꿔 끼면' : '끼면';
+      const from = wearing ? base : cur;
+      rows.push([label, `${wearing ? '(이 장비를 빼면 → 끼고 있는 지금) ' : ''}공격 ${atkText(from)} → <b>${atkText(next)}</b> · 간격 ${arrowLow(from.attackMs, next.attackMs)} · 치명 ${arrow(from.critPct, next.critPct, '%')}${from.dmgPct !== next.dmgPct ? ` · 피해 % ${arrow(from.dmgPct, next.dmgPct, '%')}` : ''}`]);
+      rows.push(['', `방어 ${arrow(from.def, next.def)} · 최대 체력 ${arrow(from.maxHp, next.maxHp)} · 명중 보너스 ${arrow(from.hitBonus, next.hitBonus, '%')} · 피해 보너스 ${arrow(from.dmgBonus, next.dmgBonus)} · 회복 ${arrow(from.regenPerTick, next.regenPerTick)}`]);
+      const r = enchantRule(d, bal);
+      let ench = `${itemDef(r.scrollId, bal).name}로 +${r.safe}까지 반드시 성공, 그 뒤는 실패하면 사라짐, 최대 +${r.max} (1단계마다 ${d.kind === 'weapon' ? `공격 +${bal.combat.weaponEnchantDamage}` : '방어 +1'})`;
+      if (enchant > 0 || uid !== null) {
+        const info = enchantInfo({ id, enchant }, s.rates, bal);
+        ench += info.next === null ? ' — <b>이미 최대</b>' : ` — 지금 +${info.current}, 다음 +${info.next} ${info.safe ? '반드시 성공' : `성공 ${Math.round(info.chance * 1000) / 10}%`}`;
+      }
+      rows.push(['강화', ench]);
+      // ⑤ #6: 세트는 실제 계산(playerStats.sets)의 전후 — 부위 7칸만, 3·5·7개 단계 효과가 누적
+      const set = d.slot && d.slot !== 'armor' && d.tier ? bal.sets?.find((x) => x.tier === d.tier) : null;
+      if (set) {
+        const at = (st) => st.sets.find((x) => x.tier === set.tier) ?? { count: 0, stage: 0, fx: {} };
+        const a = at(from), b2 = at(next);
+        const stTxt = (x) => `${x.count}개${x.stage ? ` (${x.stage}단계: ${FX_TEXT(x.fx)})` : ' (효과 없음)'}`;
+        const stages = set.stages.map(([n, fx]) => `${n}개 ${FX_TEXT({ hp: 0, def: 0, dmg: 0, crit: 0, ...fx })}`).join(' / ');
+        rows.push([`${set.name} 세트`, `같은 등급 부위(투구·티셔츠·망토·장갑·벨트·바지·부츠, 갑옷 칸 제외)를 모으면 단계 효과가 쌓입니다 — ${stages}`]);
+        rows.push(['', `${wearing ? '빼면' : '지금'} ${stTxt(a)} → ${wearing ? '끼고 있는 지금' : '이걸 끼면'} <b>${stTxt(b2)}</b>`]);
+      }
+      return rows;
+    }
+    return rows;
+  }
+  function guideCard(s, id, enchant = 0, uid = null) {
+    const rows = guideRows(s, id, enchant, uid);
+    if (!rows.length) return '';
+    return `<div class="guide"><h4>${icon(id)} ${esc(itemDef(id, bal).name)} 설명</h4>
+      <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
+  }
+
   // 가방
   function viewItems(s) {
     const it = selected(s);
@@ -304,13 +401,14 @@ export function initWindows() {
         ${it.id === 'huntScroll' ? '<button type="button" class="act primary" data-act="hunt">읽기</button>' : ''}
         ${itemDef(it.id, bal).heal ? `<button type="button" class="act" data-act="drink" data-id="${it.id}">마시기</button><p class="hint">[물약] 버튼은 모자란 체력에 맞는 물약을 골라 마십니다.</p>` : ''}</div></div>`;
     }
-    return `${statsLine(s)}<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s)}<div class="side">${side}</div></div>`;
+    return `${statsLine(s)}<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s)}<div class="side">${side}${it ? guideCard(s, it.id, it.enchant ?? 0, it.uid) : ''}</div></div>`;
   }
 
   // 강화
   function viewEnchant(s) {
     const gear = s.bag.filter((i) => isGear(i.id));
-    if (!gear.length) return '<p class="hint big">가방에 강화할 장비가 없습니다.</p>';
+    const fxBox = cur.fx ? `<div class="fx ${cur.fx.kind}">${esc(cur.fx.text)}</div>` : '';
+    if (!gear.length) return `${fxBox}<p class="hint big">가방에 강화할 장비가 없습니다.</p>`;
     if (!cur.sel || !gear.some((g) => g.uid === cur.sel.uid)) cur.sel = { where: 'bag', uid: (gear.find((g) => equipped(s, g.uid)) ?? gear[0]).uid };
     const it = selected(s);
     const info = enchantInfo(it, s.rates, bal);
@@ -318,7 +416,7 @@ export function initWindows() {
     const scrolls = inv.countItem(s, scrollId);
     const list = gear.map((g) => `<button type="button" class="row-item ${g.uid === it.uid ? 'on' : ''}" data-act="sel" data-where="bag" data-uid="${g.uid}">${icon(g.id)}<span>${esc(itemName(g))}</span>${equipped(s, g.uid) ? '<em>장착</em>' : ''}</button>`).join('');
     let center;
-    if (info.next === null) center = `<p class="hint big">${esc(josa(itemName(it), '은/는'))} 최대 강화 단계입니다.</p>`;
+    if (info.next === null) center = `${fxBox}<p class="hint big">${esc(josa(itemName(it), '은/는'))} 최대 강화 단계입니다.</p>`;
     else {
       const pct = Math.round(info.chance * 1000) / 10;
       const confirming = cur.confirm && cur.confirm.uid === it.uid && cur.confirm.level === it.enchant;
@@ -326,14 +424,78 @@ export function initWindows() {
         <div class="ench-top">${icon(it.id, 'big')}<div><h3>${esc(itemDef(it.id, bal).name)} <b>+${info.current}</b> → <b class="gold-t">+${info.next}</b></h3>
           <p>${info.safe ? '<span class="ok-t">안전 단계 · 반드시 성공</span>' : `성공 <b>${pct}%</b> · <span class="bad-t">실패하면 ${esc(josa(itemDef(it.id, bal).name, '이/가'))} 사라집니다</span>`}</p>
           <p class="sub-t">${itemDef(scrollId, bal).name} ${won(scrolls)}장${s.rates.enchant !== 1 ? ` · 강화 배율 ×${s.rates.enchant} 반영` : ''}</p></div></div>
-        ${cur.fx ? `<div class="fx ${cur.fx.kind}">${esc(cur.fx.text)}</div>` : ''}
+        ${fxBox}
         ${scrolls < 1 ? `<p class="hint">${josa(itemDef(scrollId, bal).name, '이/가')} 없습니다. 잡화상에서 살 수 있습니다.</p>`
           : confirming ? `<div class="warnbox"><p>정말 강화할까요? 실패하면 <b>${esc(josa(itemName(it), '이/가'))}</b> <b>사라집니다</b>.</p>
               <div class="btns"><button type="button" class="act danger" data-act="doEnchant" ${cur.busy ? 'disabled' : ''}>그래도 강화</button><button type="button" class="act" data-act="cancelConfirm">그만두기</button></div></div>`
           : `<div class="btns"><button type="button" class="act ${info.safe ? 'primary' : 'danger'}" data-act="${info.safe ? 'doEnchant' : 'askEnchant'}" ${cur.busy ? 'disabled' : ''}>강화하기</button></div>`}
+        ${scrolls >= 1 && !confirming ? batchBox(s, it, info, scrolls) : ''}
       </div>`;
     }
     return `<div class="split ench-split"><div class="list">${list}</div><div class="side">${center}</div></div>`;
+  }
+
+
+  // 2026-10-16 한 번에 강화: [안전 단계까지] + 목표 고르기. 목표가 위험 단계를 포함하면 확인 상자(그 장비·단계·목표·배율에만 유효)
+  function batchBox(s, it, info, scrolls) {
+    const max = info.max, safeTo = info.safeMax;
+    if (cur.bt === undefined || cur.bt <= info.current || cur.bt > max || cur.btFor !== it.uid) { cur.bt = Math.min(max, Math.max(info.current + 1, safeTo)); cur.btFor = it.uid; }
+    const plan = enchantPlan(it, cur.bt, s.rates, bal);
+    const reach = Math.min(cur.bt, info.current + scrolls); // ⑤ #5: 주문서로 갈 수 있는 끝
+    const reachPlan = reach > info.current ? enchantPlan(it, reach, s.rates, bal) : null;
+    const pct = (x) => `${Math.round(x * 1000) / 10}%`;
+    const safeBtn = info.current < safeTo
+      ? `<button type="button" class="act primary" data-act="batchSafe" ${cur.busy ? 'disabled' : ''}>안전 단계까지 한 번에 (+${info.current} → +${Math.min(safeTo, info.current + scrolls)})</button>` : '';
+    const bc = cur.bconfirm, confirming = bc && bc.uid === it.uid && bc.level === it.enchant && bc.target === cur.bt && bc.rate === s.rates.enchant;
+    const ex = reachPlan ?? plan; // ⑦ #1: 주문서로 실제 시도할 단계까지만
+    const short = reach < cur.bt;
+    const riskTxt = ex.risky.map((x) => `+${x.level} ${pct(x.chance)}`).join(' · ');
+    let body;
+    if (confirming) {
+      body = `<div class="warnbox"><p><b>+${info.current} → +${reach}</b> 한 번에 강화합니다${short ? ` <b class="bad-t">(목표 +${cur.bt}는 주문서가 ${won(scrolls)}장뿐이라 못 갑니다)</b>` : ''}. 위험 단계 ${ex.risky.length}번(${riskTxt}).</p>
+        <p>+${reach}까지 성공할 확률 <b>${pct(ex.allChance)}</b>. 주문서 최대 ${ex.scrolls}장.</p>
+        <p class="bad-t"><b>위험 단계에서 한 번이라도 실패하면 ${esc(josa(itemName(it), '이/가'))} 사라지고 거기서 멈춥니다.</b></p>
+        <div class="btns"><button type="button" class="act danger" data-act="batchGo" data-t="${cur.bt}" ${cur.busy ? 'disabled' : ''}>그래도 강화</button><button type="button" class="act" data-act="batchNo">그만두기</button></div></div>`;
+    } else {
+      body = `<div class="btrow"><span>목표</span><button type="button" class="rbtn" data-act="bt" data-d="-1" ${cur.bt <= info.current + 1 ? 'disabled' : ''}>◀</button><b class="gold-t">+${cur.bt}</b>
+        <button type="button" class="rbtn" data-act="bt" data-d="1" ${cur.bt >= max ? 'disabled' : ''}>▶</button>
+        <button type="button" class="act ${plan.risky.length ? 'danger' : 'primary'}" data-act="batchAsk" data-t="${cur.bt}" ${cur.busy ? 'disabled' : ''}>+${cur.bt}까지 한 번에</button></div>
+        <p class="sub-t">${ex.risky.length ? `위험 ${riskTxt} · +${reach}까지 성공 ${pct(ex.allChance)} · 실패하면 사라짐` : '모두 안전 단계 · 반드시 성공'} · 주문서 ${plan.scrolls}장 필요(가진 것 ${won(scrolls)}장)${short ? ` → <b class="bad-t">+${reach}까지만 가능</b>` : ''}</p>`;
+    }
+    return `<div class="batch"><h4>한 번에 강화</h4>${safeBtn}${body}</div>`;
+  }
+  // 실행: 거래가 가능한지 먼저 확인하고(⑤ #3 — 굴린 뒤 거절되지 않게) 한 거래로 저장(mustSave)
+  function doBatch(target, needConfirm) {
+    if (cur.busy) return;
+    const s = G.save, it = selected(s);
+    if (!it) return;
+    if (G.pending || G.lockedByOtherTab) { msg('지금은 강화할 수 없습니다', true); return; }
+    if (!G.storage) { msg('이 브라우저는 저장이 막혀 있어 강화할 수 없습니다', true); return; } // ⑤ #1
+    let plan;
+    try {
+      const info = enchantInfo(it, s.rates, bal), have = inv.countItem(s, info.scrollId);
+      if (have < 1) { msg(`${itemDef(info.scrollId, bal).name}이(가) 없습니다`, true); return; }
+      plan = enchantPlan(it, Math.min(target, info.current + have), s.rates, bal); // ⑦ #1: 주문서로 갈 수 있는 끝
+    } catch (e) { msg(e.message, true); return; }
+    if (needConfirm && plan.risky.length) {
+      const bc = cur.bconfirm;
+      if (!(bc && bc.uid === it.uid && bc.level === it.enchant && bc.target === target && bc.rate === s.rates.enchant)) { cur.bconfirm = { uid: it.uid, level: it.enchant, target, rate: s.rates.enchant }; render(); return; }
+    }
+    const name = itemDef(it.id, bal).name, from = it.enchant;
+    const res = enchantTo(s, it.uid, plan.target, G.scene.rng, bal);
+    if (!res.ok) { msg(res.reason, true); return; }
+    cur.busy = true; cur.bconfirm = null; cur.confirm = null;
+    const text = res.stop === 'destroyed'
+      ? `${res.steps.length > 1 ? `+${from} → +${res.steps.at(-2).level} 성공, ` : ''}+${res.steps.at(-1).level} 실패 — ${josa(name, '이/가')} 사라졌습니다 (주문서 ${res.used}장)`
+      : res.stop === 'noScroll' ? `+${from} → +${res.to} 성공 — 주문서가 모자라 멈췄습니다 (${res.used}장)` : `+${from} → +${res.to} 성공! (주문서 ${res.used}장)`;
+    const ok = deal(res, 'enchant', {
+      mustSave: true,
+      after: () => {
+        if (cur) { cur.busy = false; cur.fx = { kind: res.stop === 'destroyed' ? 'broke' : 'up', text }; if (res.stop === 'destroyed') cur.sel = null; }
+        hud.log(res.stop === 'destroyed' ? `<span style="color:#ff8a7a">${name} 한 번에 강화: ${text}</span>` : `<b style="color:#e0a63e">${name} 한 번에 강화: ${text}</b>`);
+      },
+    });
+    if (!ok && !G.pending && cur) cur.busy = false;
   }
 
   // 상점 사기(8차: 대장장이는 부위 탭으로 나눠 보여 준다)
@@ -363,7 +525,7 @@ export function initWindows() {
       <p class="sum">${won(qty)}개 · <b>${won(d.price * qty)}원</b></p>
       <div class="btns"><button type="button" class="act primary" data-act="buy" ${max < 1 ? 'disabled' : ''}>사기</button></div>
       ${max < 1 ? `<p class="hint">${s.player.gold < d.price ? '돈이 부족합니다' : '가방에 자리가 없습니다'}</p>` : ''}</div>`;
-    return `${statsLine(s)}${chips}<div class="split"><div class="list">${rows}</div><div class="side">${side}</div></div>`;
+    return `${statsLine(s)}${chips}<div class="split buysplit"><div class="list">${rows}</div><div class="side buyside">${side}${guideCard(s, d.id, 0)}</div></div>`;
   }
 
   // ---------- 8차 내 정보 ----------
@@ -733,6 +895,11 @@ export function initWindows() {
         cur.confirm = { uid: it.uid, level: it.enchant }; cur.fx = null; break;
       }
       case 'cancelConfirm': cur.confirm = null; break;
+      case 'bt': cur.bt += Number(d.d); cur.bconfirm = null; msg(''); break;
+      case 'batchSafe': { const it = selected(s); if (!it) return; const info = enchantInfo(it, s.rates, bal); doBatch(Math.min(info.safeMax, info.current + inv.countItem(s, info.scrollId)), false); return; }
+      case 'batchAsk': cur.fx = null; cur.bt = Number(d.t); doBatch(cur.bt, true); return; // 화면에 보인 목표 그대로
+      case 'batchGo': cur.bt = Number(d.t); doBatch(cur.bt, true); return;
+      case 'batchNo': cur.bconfirm = null; break;
       case 'doEnchant': doEnchant(); return;
       case 'tele': doTeleport(d.id); return;
       case 'askJunk': cur.junk = junkInfo(s, inv.junkGear(s, bal)); cur.sel = null; msg(''); break;
@@ -759,6 +926,8 @@ export function initWindows() {
     try { info = enchantInfo(it, s.rates, bal); } catch { msg('강화할 수 없습니다', true); return; }
     // 위험 단계는 지금 이 장비·이 단계에 대한 확인이 있어야 한다(연타·단계가 바뀐 뒤 실행 방지)
     if (!info.safe && !(cur.confirm && cur.confirm.uid === it.uid && cur.confirm.level === it.enchant)) { cur.confirm = { uid: it.uid, level: it.enchant }; render(); return; }
+    if (G.pending || G.lockedByOtherTab) { msg('지금은 강화할 수 없습니다', true); return; }
+    if (!G.storage) { msg('이 브라우저는 저장이 막혀 있어 강화할 수 없습니다', true); return; }
     const name = itemDef(it.id, bal).name, from = it.enchant;
     const res = tryEnchant(s, it.uid, G.scene.rng, bal);
     if (!res.ok) { msg(res.reason, true); return; }
