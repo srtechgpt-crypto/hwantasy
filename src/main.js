@@ -102,11 +102,14 @@ $('btnImport').onclick = () => {
   $('ioBox').hidden = false;
   $('ioHelp').textContent = '보관해 둔 저장 글자를 붙여 넣고 "불러오기"를 누르세요. 지금 기록은 붙여 넣은 기록으로 바뀝니다.';
   $('ioText').value = '';
+  $('ioHelp').style.color = '';
   $('ioText').readOnly = false;
   $('ioAction').textContent = '불러오기';
   $('ioAction').onclick = () => {
     const r = saveMod.importCode($('ioText').value.trim(), bal);
-    if (!r.ok) { hud.toast(r.reason || '읽을 수 없는 저장 글자입니다'); return; }
+    // 2026-10-16: 실패 이유는 알림(메뉴 뒤로 숨던 문제) + 상자 안 안내 글에도 빨갛게
+    if (!r.ok) { const why = r.reason || '읽을 수 없는 저장 글자입니다'; hud.toast(why, 3200); $('ioHelp').textContent = `불러오지 못했습니다: ${why}`; $('ioHelp').style.color = '#ff8a7a'; return; }
+    $('ioHelp').style.color = '';
     // 4차: 저장이 성공해야 확정(G.commit). 실패하면 지금 기록은 그대로, 다시 시도해도 가져온 위치를 지금 장면 위치로 덮지 않는다
     G.commit(r.save, 'import', {
       keepPosition: true,

@@ -381,8 +381,15 @@ export function exportCode(save, bal = defaultBalance) {
 }
 export function importCode(text, bal) {
   try {
-    if (typeof text !== 'string' || !text.trim().startsWith('HWANTASY1\n')) throw new TypeError('환타지 저장 코드가 아닙니다');
-    const save = migrate(JSON.parse(text.trim().slice('HWANTASY1\n'.length)), bal);
+    // 2026-10-16: 폰·대화창에서 복사하면 줄바꿈이 \r\n이 되거나, 머리글이 같은 줄에 붙거나, 긴 줄 중간에 줄바꿈·공백이 끼어든다.
+    // 저장 JSON에는 공백이 뜻을 갖는 값이 없으므로(아이디·지도 이름에 공백 없음) 머리글 뒤 모든 공백을 지우고 읽는다
+    if (typeof text !== 'string') throw new TypeError('환타지 저장 코드가 아닙니다');
+    const at = text.indexOf('HWANTASY1');
+    if (at < 0) throw new TypeError('환타지 저장 코드가 아닙니다(맨 앞 HWANTASY1이 없습니다)');
+    const body = text.slice(at + 'HWANTASY1'.length).replace(/\s+/g, '');
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { throw new TypeError('저장 글자가 중간에 잘렸습니다. 맨 끝 } 까지 통째로 복사해 주세요'); }
+    const save = migrate(parsed, bal);
     const check = validate(save, bal);
     if (!check.ok) return { ok: false, reason: '저장 코드 검사에 실패했습니다', errors: check.errors };
     return { ok: true, save };

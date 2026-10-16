@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "c6cb1254e1b3";
+const VERSION = "1db9c75d8cfc";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -174,7 +174,7 @@ const FILES = {
   "assets/ult_sword.png": "0f63c5f80c169f8812fd6805ec39b71c382adce7794822e7117cdc534e783519",
   "assets/출처.txt": "a98814b7064d1c9728acbf7de1e80c03da8faf0b1c1bf635b8fd3a75ce59537b",
   "data/balance.js": "64d804fdc69059aedc6e28c3831280db28d492ac6971221324f21b8a19e948af",
-  "data/estimate.js": "6e8f7ecb660f0d8bd2da75c4ca6a4962480e9108a9792f512a6c48694166a76a",
+  "data/estimate.js": "9542c870c7aef75c44bb7f22d19bda1a46a9f0f8d557d02f0e9ee13cea806f39",
   "data/maps.js": "cc115eae67162b5bc2677b8f77338901ab0345679d5cd9e6a6a3f41aff9f1e5d",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
@@ -186,7 +186,7 @@ const FILES = {
   "src/domain/buffs.js": "27af49da3928c1721ef8a167011488b9d06e72dd5b92a722bf2324e23a94c111",
   "src/domain/combat.js": "487c84069c110834aeeb3dbda1e1cb228ea4a04945007122cf769b77d8243bd4",
   "src/domain/common.js": "83ba9325f16ab5ba5ea447f958152d14fbf4624dc5abca32d285dd9d523f6294",
-  "src/domain/compare.js": "58dc5a5561329059a53a278d70599f99e26548727643e91d9948a93a49356bee",
+  "src/domain/compare.js": "5ea79f2925084a5476e681c8946750e2dd39b8a7a558c48c3d0ed5705ffcfde0",
   "src/domain/enchant.js": "87411943ee9d823df38735091d2835a334c4e3f231859fc4952d1f0497229c61",
   "src/domain/hotbar.js": "8793696e53d1ee5e40dbc1ae46b7a85f7f9108755b8b4376787aa80d4979d446",
   "src/domain/inventory.js": "fb40054234637d8cbfee8c1bbce89eeba4c4422b0a2752eb192569e0c1beb915",
@@ -194,12 +194,12 @@ const FILES = {
   "src/domain/progression.js": "774dee020649ae3fd2d12f77be0da05d57d8783bdd1d187c5f601c6e72bb7c95",
   "src/domain/rewards.js": "d7aebad1216a05224fdd73a3b1c9f4852f365f0813b7a286a53d463603e399cb",
   "src/domain/rng.js": "bc81a7f7bebb527ce7ac3bd95485b408897f0378a5ab6effca64446e84f2ac88",
-  "src/domain/save.js": "798c92a1b4df86de4d996c2970d8094aff7675390edafe92d324bac0456b9bb1",
+  "src/domain/save.js": "e6978da590e3e76d0df65a887ae222cba8a1c779d38f0af8621f1e2c27399822",
   "src/domain/skills.js": "c25b3d1d34ea01c327e166a2d6abbe6a3e3045327a0c5f8249946f98ac8384b8",
-  "src/main.js": "885078cccfdd375c57959309aaeaa8891a670aedb88740298062703c22ac8dd1",
+  "src/main.js": "485959fe7484ee551e2259cefa612954e23841353e857f4f5876d6d981000026",
   "src/scenes/World.js": "674fa5e9e305d4dc592a12352f9cceec376c47561c6237ab25ff435b86b8acbb",
   "src/state.js": "9af679b92c921fb4588f521852dad3f5b4e297c4cb06384fabd03f9cb010beca",
-  "src/ui/hud.css": "3abc051c4bfa3b7b8b19a48e74fd5dd82928dc835479a24ca62329625d367547",
+  "src/ui/hud.css": "9323b34fbbce4c9982463403174554cd6f1766b5192a9fbe7ff471b17b99b16a",
   "src/ui/joystick.js": "0e41ee1f5fe089271522647719d2efe3793a207d5799fe964cb628fb17fda602",
   "src/ui/minimap.js": "d9da5373661ac42925847fd7a625cb369f1aaa51048678ef0d2644b93a293caa",
   "src/ui/prefs.js": "07ed4ed989c9d6adc93639f9ee9a2776bc613f0acddbfd463457cb686d8ed9c8",
