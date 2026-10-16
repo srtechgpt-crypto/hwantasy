@@ -182,7 +182,7 @@ export default {
   },
   rates: { exp: [0.5, 1, 2, 3, 5, 10, 20, 50, 100], drop: [0.5, 1, 2, 3, 5, 10, 20, 50, 100], gold: [0.5, 1, 2, 3, 5, 10, 20, 50, 100], enchant: [0.5, 1, 1.5, 2, 3] },
   // 8차: 9부위 장착(장착 장비도 가방 칸을 차지) → 가방 50·창고 100
-  inventory: { bagSlots: 50, warehouseSlots: 100, stackMax: 999 },
+  inventory: { bagSlots: 100, warehouseSlots: 100, stackMax: 999 },
   // 8차 능력치: 자동(레벨) + 보너스(pointEvery 레벨마다 1점, 1점 = 능력치 pointValue). 계산은 progression.playerStats.
   // 힘 = 10 + floor((L−1)·str) + 3b → 피해 +1/힘. 민첩 = 10 + floor((L−1)·dex) + 3b → 명중 +1%p/dexPerHit, 공격 간격 −atkMsPerDex/민첩.
   // 체력 = 10 + floor((L−1)·con) + 3b → 최대 체력 +hpPerCon, 방어 +1/conPerDef, 재생 +1/conPerRegen.

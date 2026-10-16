@@ -1221,6 +1221,30 @@ export class WorldScene extends Phaser.Scene {
     return c.get(g.id);
   }
 
+  // 2026-10-17 가방 가득 알림. 상태는 G에 두어 장면이 다시 만들어져도 반복되지 않게 한다
+  // 빈 칸이 없어지는 순간(게임을 켰을 때 이미 가득이면 그때) 한 번 + 같은 알림은 60초 안에 다시 안 함(밀린 것은 60초 뒤 한 번)
+  checkBagFull() {
+    const full = G.save.bag.length >= bal.inventory.bagSlots;
+    const st = (G.bagAlert ??= { full: false, at: -Infinity, owed: false });
+    const t = performance.now();
+    // 가득 찬 순간이 60초 안이라 못 알렸으면(owed) 60초가 지난 뒤 아직 가득일 때 한 번 알린다(⑦). 계속 가득이어도 반복은 안 함(배지가 늘 보임)
+    if (full && !st.full) st.owed = true;
+    if (!full) st.owed = false;
+    if (full && st.owed && t - st.at > 60000) {
+      st.at = t; st.owed = false;
+      hud.toast('가방에 빈 칸이 없습니다 — 새 장비·아이템은 못 줍습니다', 3200);
+      hud.log('가방이 가득 찼습니다 (이미 있는 물약·주문서는 999개까지 쌓임)');
+    }
+    st.full = full;
+  }
+  // 줍기 실패 알림: 밟았을 때·근처에 있을 때 같은 시계로 30초에 한 번(첫 번째는 바로)
+  bagFailToast(g) {
+    const t = performance.now();
+    if (G.bagFailAt !== undefined && t - G.bagFailAt < 30000) return;
+    G.bagFailAt = t;
+    hud.toast(g ? `가방에 빈 칸이 없어 ${josa(nameOf(g.id), '을/를')} 못 줍습니다` : '가방에 빈 칸이 없어 주울 수 없습니다', 2600);
+  }
+
   // 지나가면 줍기: 이번 프레임에 닿은 것을 한 번에 저장 후보로 만들고, 저장에 성공해야 땅에서 없앤다
   updateGroundItems(now) {
     if (G.pending) return;
@@ -1228,12 +1252,19 @@ export class WorldScene extends Phaser.Scene {
       if (now > g.until) { this.removeDrop(g); continue; }
       g.sprite.setAlpha(g.until - now < 5000 ? 0.4 + 0.4 * Math.sin(now / 120) : 1);
     }
+    this.checkBagFull();
+    // 가방에 빈 칸이 없으면 자동 사냥은 못 넣는 물건을 주우러 가지 않는다 → 근처(4칸)에 있으면 알려 준다(돈 제외)
+    if (G.save.bag.length >= bal.inventory.bagSlots) {
+      const r = 4 * TILE;
+      const miss = this.groundItems.find((g) => g.kind !== 'gold' && Math.hypot(g.x - this.knight.x, g.y - this.knight.y) <= r && !this.canAccept(g));
+      if (miss) this.bagFailToast(miss);
+    }
     const touching = this.groundItems.filter((g) => Math.hypot(g.x - this.knight.x, g.y - this.knight.y) < PICKUP_RANGE);
     if (!touching.length) return;
     // 지금 기록으로 들어갈 수 없는 것(가득 찬 가방의 장비 등)은 매 프레임 다시 시도하지 않는다(G.save가 바뀌면 다시 계산)
     const near = touching.filter((g) => this.canAccept(g));
     if (!near.length) {
-      if (!this.bagFullToastAt || now - this.bagFullToastAt > 8000) { this.bagFullToastAt = now; hud.toast('가방이 가득 차서 주울 수 없습니다'); }
+      this.bagFailToast(touching.find((g) => g.kind !== 'gold'));
       return;
     }
     let cand = G.save;
@@ -1250,7 +1281,7 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     if (!took.length) {
-      if (!this.bagFullToastAt || now - this.bagFullToastAt > 8000) { this.bagFullToastAt = now; hud.toast('가방이 가득 차서 주울 수 없습니다'); }
+      this.bagFailToast(near.find((g) => g.kind !== 'gold'));
       return;
     }
     G.commit(cand, 'pickup', {
@@ -1811,6 +1842,7 @@ export class WorldScene extends Phaser.Scene {
       notice: inv.unspentPoints(s, bal) > 0 || inv.readyRewards(s, bal).length > 0,
       place: inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x)),
     });
+    hud.setBag(s.bag.length, bal.inventory.bagSlots);
     hud.setBuffs(Object.entries(s.buffs ?? {}).map(([id, ms]) => ({ id, ms, icon: buffDef(id, bal)?.item, name: buffDef(id, bal)?.name ?? id })));
   }
 }

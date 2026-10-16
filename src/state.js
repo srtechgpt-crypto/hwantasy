@@ -101,6 +101,16 @@ export const hud = {
     el.hidden = !list.length;
     if (changed || was !== el.hidden) hud.relayout?.(); // 개수·글자 폭이 바뀌면 작은 지도 아래/옆 자리 다시 판정(main.js)
   },
+  // 2026-10-17 가방 칸 배지(남은 칸 5 이하·가득)
+  setBag(used, cap) {
+    const el = $('bagBadge');
+    if (!el) return;
+    const left = cap - used;
+    const text = left <= 0 ? '가득' : left <= 5 ? `남은 ${left}` : '';
+    if (el.textContent !== text) el.textContent = text;
+    el.classList.toggle('full', left <= 0);
+    el.hidden = !text;
+  },
   setAuto(on) {
     $('btnAuto').classList.toggle('on', on);
     $('autoState').textContent = on ? '켜짐' : '꺼짐';

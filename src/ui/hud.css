@@ -251,6 +251,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* ---------- 8차: 정보 버튼 ! · 내 정보 창(장비 인형·능력치·보상)·대장장이 부위 탭 ---------- */
 #btnInfo.notice, .tab.notice { position: relative; }
+/* 2026-10-17 가방 칸 배지: 남은 칸 5 이하 주황 '남은 N', 빈 칸 없음 빨강 '가득' (버튼 폭은 그대로) */
+#btnBag { position: relative; }
+.bagbadge { position: absolute; top: -8px; right: -8px; padding: 1px 5px; border-radius: 9px; background: #d98a1e; color: #fff; font-size: 10px; font-weight: 800; line-height: 14px; white-space: nowrap; pointer-events: none; box-shadow: 0 0 4px rgba(0,0,0,.6); }
+.bagbadge.full { background: #e0503e; box-shadow: 0 0 6px rgba(224,80,62,.8); animation: blink 1.2s ease-in-out infinite; }
 #btnInfo.notice::after, .tab.notice::after { content: '!'; position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 50%; background: #e0503e; color: #fff; font-size: 11px; font-weight: 800; line-height: 16px; text-align: center; box-shadow: 0 0 6px rgba(224,80,62,.8); animation: blink 1.2s ease-in-out infinite; }
 @keyframes blink { 50% { transform: scale(1.15); } }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }

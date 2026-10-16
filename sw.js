@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "b7e0da2558ac";
+const VERSION = "1a415721e3b1";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -177,13 +177,13 @@ const FILES = {
   "assets/tiles_ex.png": "2189ecbaad7b4fd703db4b418485ca4ab63dda917bf205d3a2367f15dfe980bd",
   "assets/ult_sword.png": "0f63c5f80c169f8812fd6805ec39b71c382adce7794822e7117cdc534e783519",
   "assets/출처.txt": "a98814b7064d1c9728acbf7de1e80c03da8faf0b1c1bf635b8fd3a75ce59537b",
-  "data/balance.js": "91b4aaff5ebf8ff8b700a3bcc8e8db45a810ef01de85ec8fa774b10a3494f3f5",
-  "data/estimate.js": "f807e00e52f0ea0999127a627a40973b7405acd996e019e9a77d13d2551e4ffe",
+  "data/balance.js": "e99b09c1ac52883b92b35080338dbebac17c81035c86e6f64924fa98cbfc107c",
+  "data/estimate.js": "feb5cd64a36c50cd9ca096cf7b274594be96d01256c81eeca1071e9a646638eb",
   "data/maps.js": "cc115eae67162b5bc2677b8f77338901ab0345679d5cd9e6a6a3f41aff9f1e5d",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
   "icons/icon-maskable-512.png": "d209bbef68bf9c836b7675a99c297b45d7ec2d55a4b75736f042870ddd8e567d",
-  "index.html": "d6f055c825939e9827d99a44220a58162961c295cc6e98eca925e6ff46c5c3f3",
+  "index.html": "abaf0b3504dfc731e505e612dd5c07fd17c70038ebe38ce2ab7314c63517484f",
   "manifest.webmanifest": "e52e09ae050d75862cd4048e27a0480f2a2e128b32557c4debb4160aa3809f8e",
   "src/domain/autohunt.js": "250bf3c18b42bb778322f712898a4174f2564a440fa0b621aa9ea1f9af708cc4",
   "src/domain/boss.js": "91dafb0d88f42a8995c02ae5051e652521bc732ccc0991a8dd009bdde616e599",
@@ -202,9 +202,9 @@ const FILES = {
   "src/domain/save.js": "64628ee02714ac8b07794318c75e18f7855ee1f470c560f2d820f7f8115b21c1",
   "src/domain/skills.js": "c25b3d1d34ea01c327e166a2d6abbe6a3e3045327a0c5f8249946f98ac8384b8",
   "src/main.js": "2525f6c11e5b0a27729e41dabac131b28309410362ea80d5e8c6aff500e499cb",
-  "src/scenes/World.js": "900d889b32cd8a0c409cc3920546eb11783d2f28ad9052c9a92f2b4c5e7771db",
-  "src/state.js": "f9f52eadcfae8a2e9ad757dab472271de6a0c57f14305cd14dd8823e7dd38da8",
-  "src/ui/hud.css": "f1a891fda08d21559840af2d0da5c509f96d9763ba9a12d8bc8d4d23b5187443",
+  "src/scenes/World.js": "77e04f799b5bc444a94f4fb83d75a054d3808ed45b6968274734ddd6db7cca95",
+  "src/state.js": "a464239738e2780cfa828632e50bfcac1141dd774e93e67538364b17ad7d07e6",
+  "src/ui/hud.css": "19e0a7cfd0bb0170c4eba7672f96f41440e297fe48ec17d1ae39cee2ed3e098f",
   "src/ui/joystick.js": "0e41ee1f5fe089271522647719d2efe3793a207d5799fe964cb628fb17fda602",
   "src/ui/minimap.js": "d9da5373661ac42925847fd7a625cb369f1aaa51048678ef0d2644b93a293caa",
   "src/ui/prefs.js": "07ed4ed989c9d6adc93639f9ee9a2776bc613f0acddbfd463457cb686d8ed9c8",
