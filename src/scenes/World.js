@@ -15,6 +15,7 @@ import { placeLearned, autoUse, PAGE_SIZE } from '../domain/hotbar.js';
 import { createSkillFx } from '../ui/skillfx.js';
 import { compareGear } from '../domain/compare.js';
 import { statsOf } from '../domain/save.js';
+import { applyBuffs, buffedExp, tickBuffs, buffDef, buffOfItem } from '../domain/buffs.js';
 import { createJoystick } from '../ui/joystick.js';
 import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
@@ -38,7 +39,7 @@ const UNREACH_MS = 20000;     // 5차: 길이 없는 몬스터는 이 시간 동
 const ROAM_MS = 8000;         // 5차: 돌아다니기 목표 하나에 쓰는 최대 시간
 const NUDGE = 6;              // 5차: 조이스틱이 모서리에 걸리면 옆으로 이만큼(px) 안에 빈 곳을 찾아 미끄러진다
 // 9차: 단축 칸 물건 짧은 이름, 방어 스킬 글자 색, 8방향 → 각도(대지 가르기 방향)
-const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', returnScroll: '귀환' };
+const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', returnScroll: '귀환', powerPotion: '힘', hastePotion: '날쌤', guardPotion: '수호', expScroll: '경험', huntScroll: '이동' };
 const DEF_COLOR = { block: '#9fd8ff', heal: '#7dff9a', guard: '#9fd8ff', counter: '#ff7a6a' };
 const FACE_ANGLE = { right: 0, downRight: Math.PI / 4, down: Math.PI / 2, downLeft: (3 * Math.PI) / 4, left: Math.PI, upLeft: (-3 * Math.PI) / 4, up: -Math.PI / 2, upRight: -Math.PI / 4 };
 const MAX_FLOATS = 30; // ⑤ #19: 떠오르는 글자 상한
@@ -154,6 +155,7 @@ export class WorldScene extends Phaser.Scene {
     // 9차: 막기·반격 끝 시각, 필살기 시전 상태(시전 세대 번호가 바뀌면 취소), 버프 표시, 떠오르는 글자
     this.blockUntil = 0;
     this.counterUntil = 0;
+    this.buffAcc = 0; // 10차: 버프 시간 — 소수 ms를 모아 정수로만 save.buffs에서 뺀다(⑤ #6)
     this.casting = null;
     this.castGen = 0;
     this.floats = [];
@@ -368,7 +370,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   // 순간이동 저장이 성공한 뒤 불린다(G.save.player에 목적지가 이미 들어 있음)
-  applyTeleport(name) {
+  applyTeleport(name, byScroll = false) {
     this.setAuto(false);
     this.releaseInput();
     this.cancelSlam();
@@ -381,7 +383,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.flash(260, 200, 230, 255);
     this.invulnUntil = this.gt + 1500;
     for (const m of this.monsters) m.aggro = false;
-    hud.log(`순간이동 마법사가 ${josa(name, '으로/로')} 보내 주었습니다`);
+    hud.log(byScroll ? `사냥터 이동 주문서를 읽어 ${josa(name, '으로/로')} 왔습니다` : `순간이동 마법사가 ${josa(name, '으로/로')} 보내 주었습니다`);
     this.refreshHud(true);
   }
 
@@ -560,6 +562,8 @@ export class WorldScene extends Phaser.Scene {
     this.updateCasting();
     if (G.pending) return;
     this.updateSkillFx(now);
+    this.tickBuffTime(dtMs);
+    this.autoBuffs();
     this.updateGroundItems(now);
     this.updateTalk();
     this.updateRegion();
@@ -637,8 +641,79 @@ export class WorldScene extends Phaser.Scene {
 
   // ---------- 기사 행동 ----------
   stats() {
-    // 8차: 장비 9칸 + 보너스 능력치(공격 간격·명중·재생 포함)
-    return statsOf(G.save, bal);
+    // 8차: 장비 9칸 + 보너스 능력치(공격 간격·명중·재생 포함). 10차: 켜진 버프(힘·날쌤·수호)를 매번 새로 더함(캐시 없음, ⑤ #25)
+    return applyBuffs(statsOf(G.save, bal), G.save.buffs, G.save.player.level, bal);
+  }
+
+  // ---------- 10차 버프 ----------
+  // 게임 시계로만 흐른다(update가 멈춤·저장 대기 중에는 여기까지 오지 않음). 정수 ms만 빼고 나머지는 모아 둔다
+  tickBuffTime(dtMs) {
+    const b = G.save.buffs;
+    if (!b || !Object.keys(b).length) { this.buffAcc = 0; return; }
+    this.buffAcc += dtMs;
+    const whole = Math.floor(this.buffAcc);
+    if (whole <= 0) return;
+    this.buffAcc -= whole;
+    const r = tickBuffs(b, whole);
+    if (r.buffs === b) return;
+    G.save.buffs = r.buffs;
+    for (const id of r.ended) hud.log(`<span style="color:#9fd8ff">${buffDef(id, bal)?.name ?? id} 효과가 끝났습니다</span>`);
+  }
+  buffLeft(id) { return G.save.buffs?.[id] ?? 0; }
+  // 버프 아이템 쓰기(단축 칸·가방 공용): 1개 쓰고 남은 시간에 더함. 상한이면 쓰지 않음
+  useBuffItem(itemId, manual) {
+    const b = buffOfItem(itemId, bal);
+    if (!b || !this.canAct()) return false;
+    if (G.save.player.hp <= 0) return false;
+    const res = inv.useBuff(G.save, itemId, bal);
+    if (!res.ok) { if (manual) hud.toast(res.reason); return false; }
+    G.save = res.save;
+    this.potionFx(itemId);
+    const min = Math.round(res.ms / 60000);
+    this.floatText(this.knight.x, this.knight.y - 18, `${b.name} ${min}분`, '#ffd36a');
+    hud.log(`${nameOf(itemId)}${manual ? '' : '(자동)'} — ${b.desc.replace(/^\d+분 동안 /, '')} · 남은 시간 ${min}분`);
+    G.persist('buff');
+    this.refreshSkills(true);
+    return true;
+  }
+  // 자동 사냥 중: 단축 칸(12칸 전부)에 올려 둔 버프 아이템은 효과가 없으면 자동으로 쓴다(⑤ #23 — 한 프레임에 하나, 사냥터에서만)
+  autoBuffs() {
+    if (!G.auto || !this.canAct() || G.save.player.hp <= 0 || this.casting) return;
+    if (mapIdAt(this.knight.x) === 'town' || inBossRoom(this.knight.x, this.knight.y)) return;
+    if (this.gt < (this.autoBuffAt ?? 0)) return;
+    this.autoBuffAt = this.gt + 500;
+    for (const e of G.save.hotbar?.slots ?? []) {
+      if (e?.t !== 'item') continue;
+      const b = buffOfItem(e.id, bal);
+      if (!b || this.buffLeft(b.id) > 0 || countOf(G.save, e.id) <= 0) continue;
+      if (this.useBuffItem(e.id, false)) return;
+    }
+  }
+  // 아이템 쓰기 입구(단축 칸·키보드): 회복 물약·버프·귀환·사냥터 이동을 정의대로 나눈다(⑤ #21)
+  useItem(id) {
+    const d = bal.consumables.find((c) => c.id === id);
+    if (!d) return false;
+    if (id === 'returnScroll') return this.useReturn('직접');
+    if (id === 'huntScroll') return this.openHuntScroll();
+    if (d.buff) return this.useBuffItem(id, true);
+    return this.drinkPotion(true, id);
+  }
+  // 사냥터 이동 주문서: 목록만 열고(소모 없음) 고른 순간 다시 검사해 1장 쓴다(⑤ #26)
+  // ignorePause: 창(가방·주문서 목록)이 열려 게임이 멈춘 상태에서 고를 때 — 멈춤 사유는 창 하나뿐이어야 함
+  huntScrollBlock({ ignorePause = false } = {}) {
+    const onlyWindow = G.pause.size === 1 && G.pause.has('window');
+    if (!this.playing || !G.save || G.pending || (ignorePause ? !(G.pause.size === 0 || onlyWindow) : !this.canAct())) return '지금은 쓸 수 없습니다';
+    if (G.save.player.hp <= 0) return '쓰러진 상태에서는 쓸 수 없습니다';
+    if (inBossRoom(this.knight.x, this.knight.y)) return '보스 방에서는 쓸 수 없습니다';
+    if (this.casting) return '필살기를 쓰는 중에는 쓸 수 없습니다';
+    if (countOf(G.save, 'huntScroll') <= 0) return '사냥터 이동 주문서가 없습니다';
+    return null;
+  }
+  openHuntScroll() {
+    const why = this.huntScrollBlock();
+    if (why) { hud.toast(why); return false; }
+    G.ui.open('tele', { scroll: true });
+    return true;
   }
 
   dist(m) { return Math.hypot(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y) - (m.reach || 0); }
@@ -911,9 +986,11 @@ export class WorldScene extends Phaser.Scene {
         list.push({ i, kind: 'skill', id: e.id, name: d.name, icon: `sk_${e.id}`, label: d.short, left: this.skillLeft(e.id), total: d.cooldownMs, active: this.buffOn(e.id), casting: this.casting?.id === e.id });
       } else {
         const pd = bal.consumables.find((c) => c.id === e.id);
-        const potion = e.id !== 'returnScroll';
+        const potion = pd?.heal > 0;
+        const bf = pd?.buff ? buffDef(pd.buff, bal) : null;
         list.push({ i, kind: 'item', id: e.id, name: pd?.name ?? e.id, icon: e.id, label: ITEM_SHORT[e.id] ?? '', count: countOf(s, e.id),
-          left: potion ? this.potionCd * 1000 : 0, total: potion ? this.potionCdTotal || pd?.cooldownMs || 1000 : 0 });
+          left: potion ? this.potionCd * 1000 : 0, total: potion ? this.potionCdTotal || pd?.cooldownMs || 1000 : 0,
+          active: bf ? this.buffLeft(bf.id) > 0 : false });
       }
     }
     hud.setHotbar(list, page);
@@ -925,8 +1002,7 @@ export class WorldScene extends Phaser.Scene {
     const e = G.save.hotbar?.slots[(this.prefs.page ?? 0) * PAGE_SIZE + i];
     if (!e) { G.ui.open('me', { tab: 'skill' }); return; }
     if (e.t === 'skill') this.useSkill(e.id, null, true);
-    else if (e.id === 'returnScroll') this.useReturn('직접');
-    else this.drinkPotion(true, e.id);
+    else this.useItem(e.id);
   }
   flipPage() {
     this.prefs.page = (this.prefs.page ?? 0) === 0 ? 1 : 0;
@@ -969,6 +1045,7 @@ export class WorldScene extends Phaser.Scene {
 
     const s = G.save;
     const rw = rewards.rollRewards(m.id, s.player.level, ratesOf(s), this.rng, bal);
+    rw.exp = buffedExp(rw.exp, s.buffs, bal); // 10차: 경험치 두루마리(배율·저레벨 보정 뒤 한 번, 반격 처치도 이 길)
     const before = s.player.level;
     const r = prog.addExp({ level: s.player.level, exp: s.player.exp }, rw.exp, bal);
     s.player.level = r.level; s.player.exp = r.exp;
@@ -992,6 +1069,7 @@ export class WorldScene extends Phaser.Scene {
     const s = G.save;
     // 처치한 보스의 id 하나로 보상 추첨·저장·후처리를 모두 한다
     const rw = rewards.rollRewards(b.id, s.player.level, ratesOf(s), this.rng, bal);
+    rw.exp = buffedExp(rw.exp, s.buffs, bal); // 10차: 경험치 두루마리
     const res = inv.bossKill(s, b.id, rw, Date.now(), bal);
     if (!res.ok) { hud.toast(res.reason); b.alive = true; b.hp = 1; b.sprite.setVisible(true); b.label.setVisible(true); return; }
     const done = G.commit(res.save, 'boss', {
@@ -1042,6 +1120,11 @@ export class WorldScene extends Phaser.Scene {
       ? this.add.image(x, y, 'coin').setScale(count >= 100 ? 2.4 : 1.9)
       : this.add.image(x, y, `ic_${id}`).setScale(0.75);
     sprite.setDepth(9);
+    // 10차: 희귀는 땅에서 반짝임(크기 숨쉬기) + 알림
+    if (kind === 'item' && bal.armors.concat(bal.weapons).find((d) => d.id === id)?.rare) {
+      this.tweens.add({ targets: sprite, scale: { from: 0.75, to: 0.95 }, duration: 520, yoyo: true, repeat: -1, delay: 280 });
+      hud.toast(`희귀 장비 ${nameOf(id)}이(가) 떨어졌습니다!`, 2600);
+    }
     this.tweens.add({ targets: sprite, x: tx, duration: 260, ease: 'Linear' });
     this.tweens.add({ targets: sprite, y: { from: y - 2, to: ty }, duration: 260, ease: 'Bounce.easeOut' });
     const g = { uid: ++this.dropSeq, kind, id, count, sprite, x: tx, y: ty, until: this.gt + GROUND_ITEM_MS, skipUntil: 0, mark: null };
@@ -1143,7 +1226,7 @@ export class WorldScene extends Phaser.Scene {
 
   // 8차: 물약 종류별 색 반짝임(초급 빨강·중급 파랑·고급 보라)
   potionFx(id) {
-    const color = { potion: 0xff6a6a, potionMid: 0x6aa8ff, potionHigh: 0xc07aff }[id] ?? 0xff6a6a;
+    const color = { potion: 0xff6a6a, potionMid: 0x6aa8ff, potionHigh: 0xc07aff, powerPotion: 0xffa040, hastePotion: 0x7dff9a, guardPotion: 0xffe060, expScroll: 0xd8a0ff }[id] ?? 0xff6a6a;
     for (let i = 0; i < 6; i++) {
       const a = (Math.PI * 2 * i) / 6;
       const p = this.add.circle(this.knight.x + Math.cos(a) * 6, this.knight.y - 8 + Math.sin(a) * 4, 1.5, color).setDepth(955);
@@ -1660,6 +1743,7 @@ export class WorldScene extends Phaser.Scene {
       notice: inv.unspentPoints(s, bal) > 0 || inv.readyRewards(s, bal).length > 0,
       place: inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x)),
     });
+    hud.setBuffs(Object.entries(s.buffs ?? {}).map(([id, ms]) => ({ id, ms, icon: buffDef(id, bal)?.item, name: buffDef(id, bal)?.name ?? id })));
   }
 }
 

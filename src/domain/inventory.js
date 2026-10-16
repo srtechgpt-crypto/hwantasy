@@ -3,6 +3,7 @@ import { bossDef } from './boss.js';
 import { addExp, bonusPoints, validBonus } from './progression.js';
 import { TELEPORTS } from '../../data/maps.js';
 import { validate, statsOf, settleHp } from './save.js';
+import { applyBuffItem } from './buffs.js';
 
 function transaction(save, bal, run) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
@@ -115,7 +116,7 @@ export function sell(save, uid, count, bal) {
 // 같은 종류를 끼고 있지 않으면 그 종류는 대상 없음. 강화된 것·보스 장비(shop:false)·더 좋은 것은 절대 대상이 아니다.
 // 비교는 장비의 기본 수치 기준이다(강화로 오른 값은 보지 않음 — 틀려도 '안 파는' 쪽으로만 틀린다. 예: 강철검+6을 끼고 있으면 미스릴검+0은 남긴다).
 // 8차: 같은 칸(부위)의 낀 장비와 비교하고, 그 부위의 모든 수치(무기 최소·최대 / 방어·체력·명중·피해·재생)가 같거나 낮을 때만
-const GEAR_FIELDS = { weapon: ['min', 'max'], armor: ['def', 'hp', 'hit', 'dmg', 'regen'] };
+const GEAR_FIELDS = { weapon: ['min', 'max', 'dmgPct', 'crit', 'hit'], armor: ['def', 'hp', 'hit', 'dmg', 'regen'] };
 export function isJunkGear(save, item, bal) {
   const def = itemDef(item?.id, bal);
   if (!isGearDef(def) || !def.shop || item.enchant !== 0 || item.count !== 1) return false;
@@ -123,6 +124,11 @@ export function isJunkGear(save, item, bal) {
   const worn = save.bag.find(other => other.uid === save.equip[slotOf(def)]);
   const wd = worn && itemDef(worn.id, bal);
   if (!wd || slotOf(wd) !== slotOf(def)) return false;
+  // 10차: 무기는 같은 계열끼리만 비교, 공격 간격(speedPct)은 같거나 느릴 때만(+가 느림)
+  if (def.kind === 'weapon' && ((def.type ?? 'sword') !== (wd.type ?? 'sword') || (def.speedPct ?? 0) < (wd.speedPct ?? 0))) return false;
+  // 10차(⑤ #15): 부위 장비는 같은 등급 부위를 다른 칸에 하나라도 끼고 있으면 세트 후보라 팔지 않는다
+  const partTier = d => (d?.kind === 'armor' && d.slot && d.slot !== 'armor' ? d.tier : null);
+  if (partTier(def) && EQUIP_SLOTS.some(sl => sl !== slotOf(def) && partTier(itemDef(save.bag.find(o => o.uid === save.equip[sl])?.id, bal)) === def.tier)) return false;
   return GEAR_FIELDS[def.kind].every(f => (def[f] ?? 0) <= (wd[f] ?? 0));
 }
 export function junkGear(save, bal) {
@@ -262,6 +268,22 @@ export function useReturnScroll(save, bal) {
     if (next.player.hp <= 0) return fail('사망 중에는 귀환할 수 없습니다');
     if (take(next, 'returnScroll', 1)) return fail('귀환 주문서가 없습니다');
     Object.assign(next.player, { map: bal.town.id, x: bal.town.x, y: bal.town.y });
+    return { ok: true, save: next };
+  });
+}
+// 10차 버프 아이템(힘·날쌘·수호 물약, 경험치 두루마리): 1개 쓰고 남은 시간에 더함(상한)
+export function useBuff(save, itemId, bal) {
+  return transaction(save, bal, next => applyBuffItem(next, itemId, bal, take));
+}
+// 10차 사냥터 이동 주문서: 어디서든(보스 방·시전 중 여부는 화면이 먼저 막음) 고른 사냥터 입구로, 주문서 1장(돈 없음)
+export function useHuntScroll(save, destId, bal) {
+  const dest = bal.teleport?.find(item => item.id === destId);
+  const point = TELEPORTS.find(item => item.id === destId);
+  if (!dest || !point) return fail('갈 수 없는 곳입니다');
+  return transaction(save, bal, next => {
+    if (next.player.hp <= 0) return fail('쓰러진 상태에서는 이동할 수 없습니다');
+    if (take(next, 'huntScroll', 1)) return fail('사냥터 이동 주문서가 없습니다');
+    Object.assign(next.player, { map: destId, x: point.x, y: point.y });
     return { ok: true, save: next };
   });
 }

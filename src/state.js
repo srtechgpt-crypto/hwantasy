@@ -90,6 +90,15 @@ export const hud = {
       b.setAttribute('aria-label', k.empty ? `빈 단축 칸 ${k.i + 1}` : `${k.name} (${k.i + 1})`);
     }
   },
+  // 10차 켜진 버프: 아이콘 + 남은 시간(1분 이상 'N분', 미만 'N초'). 같은 내용이면 다시 그리지 않음
+  setBuffs(list) {
+    const el = $('hudBuffs');
+    if (!el) return;
+    const text = (ms) => (ms >= 60000 ? `${Math.floor(ms / 60000)}분` : `${Math.max(1, Math.ceil(ms / 1000))}초`);
+    const html = list.map((b) => `<span class="buff ${b.ms < 60000 ? 'low' : ''}" title="${b.name}"><img src="assets/icons/${b.icon}.png" alt=""><em>${text(b.ms)}</em></span>`).join('');
+    if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+    el.hidden = !list.length;
+  },
   setAuto(on) {
     $('btnAuto').classList.toggle('on', on);
     $('autoState').textContent = on ? '켜짐' : '꺼짐';

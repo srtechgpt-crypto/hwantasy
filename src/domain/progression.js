@@ -53,20 +53,41 @@ export function attributes(level, bonus, bal) {
 // attackMs, regenPerTick·regenMs, weapon{min,max,enchant}, gear(장비 합), str·dex·con, points
 // 9차: 패시브(배운 것) 반영 — 최대 체력 ×(1+hpPct%) 내림, 방어 +def, 공격 간격 ×(1−atkPct%)(최소 간격 지킴),
 // critPct(치명 %), lowHpReduce·lowHpRatio(불굴). 저장 검사·체력 정리·레벨업이 모두 이 함수 하나를 쓴다(⑤ #4)
+// 10차 세트 효과: 7부위(큰 갑옷 제외) 중 같은 등급(희귀 포함 — 정의의 tier) 장착 수. 등급마다 3·5·7 단계를 누적.
+// defs = 장착한 장비 정의 목록. 반환 [{ tier, name, count, stage(0·3·5·7), next(다음 단계 개수|null), fx{hp,def,dmg,crit} }] (count ≥ 1인 등급만, 등급 순)
+export function activeSets(defs, bal) {
+  const count = {};
+  for (const d of defs) if (d?.kind === 'armor' && d.slot && d.slot !== 'armor' && d.tier) count[d.tier] = (count[d.tier] ?? 0) + 1;
+  return (bal.sets ?? []).filter(set => count[set.tier]).map(set => {
+    const n = count[set.tier], fx = { hp: 0, def: 0, dmg: 0, crit: 0 };
+    let stage = 0;
+    for (const [need, add] of set.stages) if (n >= need) { stage = need; for (const k of Object.keys(fx)) fx[k] += add[k] ?? 0; }
+    const next = set.stages.find(([need]) => n < need)?.[0] ?? null;
+    return { tier: set.tier, name: set.name, count: n, stage, next, fx };
+  });
+}
 export function playerStats(level, equip, bal, bonus = NO_BONUS) {
   assertLevel(level, bal);
   if (!isRecord(equip)) throw new TypeError('장비 정보가 필요합니다');
   const gear = { def: 0, hp: 0, hit: 0, dmg: 0, regen: 0 };
-  let weapon = null;
+  let weapon = null, wdef = null;
+  const defs = [];
   for (const slot of EQUIP_SLOTS) {
     const item = equip[slot];
     if (item === null || item === undefined) continue;
     const def = itemDef(item?.id, bal);
     if (slotOf(def) !== slot || !integer(item.enchant, 0, enchantRule(def, bal).max)) throw new RangeError('장비가 올바르지 않습니다');
-    if (def.kind === 'weapon') { weapon = { min: def.min, max: def.max, enchant: item.enchant }; continue; }
+    defs.push(def);
+    if (def.kind === 'weapon') { weapon = { min: def.min, max: def.max, enchant: item.enchant }; wdef = def; continue; }
     gear.def += (def.def ?? 0) + item.enchant;
     gear.hp += def.hp ?? 0; gear.hit += def.hit ?? 0; gear.dmg += def.dmg ?? 0; gear.regen += def.regen ?? 0;
   }
+  // 10차 세트 효과는 장비 합에 더한다(최대 체력·방어·피해), 치명은 따로
+  const sets = activeSets(defs, bal);
+  let setCrit = 0;
+  for (const set of sets) { gear.hp += set.fx.hp; gear.def += set.fx.def; gear.dmg += set.fx.dmg; setCrit += set.fx.crit; }
+  // 10차 무기 계열: 최종 피해 %(dmgPct), 공격 간격 %(speedPct — 최소 간격도 같은 비율), 치명·명중 %p
+  const speed = 100 + (wdef?.speedPct ?? 0);
   const a = attributes(level, bonus, bal);
   const k = bal.knight, st = bal.stats, pm = passiveMods(level, bal);
   const str = a.str - st.base, dex = a.dex - st.base, con = a.con - st.base;
@@ -77,12 +98,17 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS) {
     maxHp: Math.floor((hpBase * (100 + pm.hpPct)) / 100),
     dmgBonus: Math.max(Math.floor(level / k.atkDivisor), str) + gear.dmg,
     def: Math.floor(level / k.defDivisor) + Math.floor(con / st.conPerDef) + gear.def + pm.def,
-    hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit,
-    attackMs: Math.max(st.minAttackMs, Math.round((atkBase * (100 - pm.atkPct)) / 100)),
-    critPct: pm.critPct, lowHpReduce: pm.lowHpReduce, lowHpRatio: pm.lowHpRatio,
+    hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit + (wdef?.hit ?? 0),
+    // 간격 = 민첩 → 패시브 → 무기 계열 순으로 곱하고 한 번 반올림(검은 speed 100이라 9차와 같은 값). 최소 간격도 무기 계열 비율
+    attackMs: Math.max(Math.round((st.minAttackMs * speed) / 100), Math.round((atkBase * (100 - pm.atkPct) * speed) / 10000)),
+    // ⑤ #8: 최소 간격으로 자르기 전 값 — 날쌘 물약은 이 값에 곱한 뒤 마지막에 한 번만 자른다
+    attackMsRaw: (atkBase * (100 - pm.atkPct) * speed) / 10000,
+    minAttackMs: Math.round((st.minAttackMs * speed) / 100),
+    dmgPct: wdef?.dmgPct ?? 0,
+    critPct: pm.critPct + setCrit + (wdef?.crit ?? 0), lowHpReduce: pm.lowHpReduce, lowHpRatio: pm.lowHpRatio,
     regenPerTick: k.regenBase + Math.floor(level / k.regenDivisor) + Math.floor(con / st.conPerRegen) + gear.regen,
     regenMs: k.regenMs,
     weapon: weapon ?? { min: bal.combat.bareMin, max: bal.combat.bareMax, enchant: 0 },
-    gear,
+    gear, sets,
   };
 }
