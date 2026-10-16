@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "1a415721e3b1";
+const VERSION = "2b711136c9ff";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -183,7 +183,7 @@ const FILES = {
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
   "icons/icon-maskable-512.png": "d209bbef68bf9c836b7675a99c297b45d7ec2d55a4b75736f042870ddd8e567d",
-  "index.html": "abaf0b3504dfc731e505e612dd5c07fd17c70038ebe38ce2ab7314c63517484f",
+  "index.html": "d7e765e4336d536f8da0ba90bca7c826ba6c9c06cbc0bdb603928a657b723838",
   "manifest.webmanifest": "e52e09ae050d75862cd4048e27a0480f2a2e128b32557c4debb4160aa3809f8e",
   "src/domain/autohunt.js": "250bf3c18b42bb778322f712898a4174f2564a440fa0b621aa9ea1f9af708cc4",
   "src/domain/boss.js": "91dafb0d88f42a8995c02ae5051e652521bc732ccc0991a8dd009bdde616e599",
@@ -201,10 +201,10 @@ const FILES = {
   "src/domain/rng.js": "bc81a7f7bebb527ce7ac3bd95485b408897f0378a5ab6effca64446e84f2ac88",
   "src/domain/save.js": "64628ee02714ac8b07794318c75e18f7855ee1f470c560f2d820f7f8115b21c1",
   "src/domain/skills.js": "c25b3d1d34ea01c327e166a2d6abbe6a3e3045327a0c5f8249946f98ac8384b8",
-  "src/main.js": "2525f6c11e5b0a27729e41dabac131b28309410362ea80d5e8c6aff500e499cb",
+  "src/main.js": "e5a86d9d1286cec3705b90de367fa62b44c1a38334e589bf369e38bb1edb25ce",
   "src/scenes/World.js": "77e04f799b5bc444a94f4fb83d75a054d3808ed45b6968274734ddd6db7cca95",
   "src/state.js": "a464239738e2780cfa828632e50bfcac1141dd774e93e67538364b17ad7d07e6",
-  "src/ui/hud.css": "19e0a7cfd0bb0170c4eba7672f96f41440e297fe48ec17d1ae39cee2ed3e098f",
+  "src/ui/hud.css": "c7087b11ea45efb6e7a7484ab6757a0fdf9a0fc406a5cb543966d6237a08a66a",
   "src/ui/joystick.js": "0e41ee1f5fe089271522647719d2efe3793a207d5799fe964cb628fb17fda602",
   "src/ui/minimap.js": "d9da5373661ac42925847fd7a625cb369f1aaa51048678ef0d2644b93a293caa",
   "src/ui/prefs.js": "07ed4ed989c9d6adc93639f9ee9a2776bc613f0acddbfd463457cb686d8ed9c8",
@@ -274,6 +274,16 @@ self.addEventListener("fetch", event => {
   })());
 });
 
+// 이 빌드의 캐시에 파일이 모두 있는지
+async function cacheReady() {
+  if (!await caches.has(CACHE_NAME)) return false;
+  const cache = await caches.open(CACHE_NAME);
+  for (const name of Object.keys(FILES)) {
+    if (!await cache.match(fileURL(name))) return false;
+  }
+  return true;
+}
+
 self.addEventListener("message", event => {
   const reply = data => {
     if (event.ports && event.ports[0]) event.ports[0].postMessage(data);
@@ -281,21 +291,24 @@ self.addEventListener("message", event => {
   if (event.data === "status") {
     event.waitUntil((async () => {
       try {
-        let ready = await caches.has(CACHE_NAME);
-        if (ready) {
-          const cache = await caches.open(CACHE_NAME);
-          for (const name of Object.keys(FILES)) {
-            if (!await cache.match(fileURL(name))) { ready = false; break; }
-          }
-        }
-        reply({ready, version: VERSION});
+        reply({ready: await cacheReady(), version: VERSION});
       } catch (_) {
         reply({ready: false, version: VERSION});
       }
     })());
-  } else if (event.data === "apply") {
+  } else if (event.data === "apply" || (typeof event.data === "string" && event.data.startsWith("apply:"))) {
+    // "apply:<버전>" = 게임 중 [지금 업데이트]. 알린 버전과 다르거나 파일이 다 없으면 바꾸지 않는다
+    const expected = event.data === "apply" ? null : event.data.slice(6);
     event.waitUntil((async () => {
       try {
+        if (expected !== null && expected !== VERSION) {
+          reply({applied: false, reason: "version"});
+          return;
+        }
+        if (!await cacheReady()) {
+          reply({applied: false, reason: "not-ready"});
+          return;
+        }
         // A waiting worker controls no windows yet, so include uncontrolled
         // clients and count only windows inside this registration's scope.
         const windows = (await self.clients.matchAll({type: "window", includeUncontrolled: true}))

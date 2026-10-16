@@ -29,7 +29,7 @@
     <button class="small" id="btnMap" type="button">지도</button>
     <button class="small" id="btnInfo" type="button">정보</button>
     <button class="small" id="btnBag" type="button">가방<span class="bagbadge" id="bagBadge" hidden></span></button>
-    <button class="small" id="btnMenu" type="button">메뉴</button>
+    <button class="small" id="btnMenu" type="button">메뉴<span class="bagbadge" id="menuBadge" hidden>새</span></button>
   </div>
   <!-- 2026-10-17 대표님: 물약·주문서 버프 칸은 위쪽 줄 대신 작은 지도 아래(위치는 main.js placeUnderHud) -->
   <span class="buffs" id="hudBuffs" hidden></span>
@@ -96,6 +96,8 @@
     <h2>메뉴</h2>
     <div class="col">
       <button class="wide" id="btnResume" type="button">게임으로 돌아가기</button>
+      <!-- 2026-10-17 대표님: 게임 중 새 버전을 다 받으면 저장 후 바로 바꾸기(홈 화면 앱에서만 보임) -->
+      <button class="wide update" id="btnUpdate" type="button" hidden><span id="updLabel">지금 업데이트</span> <small id="updVer"></small></button>
       <div class="zoomrow"><span>화면 크기</span>
         <div class="seg"><button id="zoomFar" type="button">멀리</button><button id="zoomMid" type="button">보통</button><button id="zoomNear" type="button">가까이</button></div>
       </div>
@@ -152,6 +154,18 @@
     let applying = false;
     let checking = false;
     let reloading = false;
+    // 2026-10-17 대표님: 게임 중에 새 버전을 받으면 [지금 업데이트]로 바로 바꾸기.
+    // 게임(main.js)은 이 상태를 읽고 'hw-update' 알림을 받는다. state: none | ready | applying
+    // 수동 교체 대상 {worker, version}: 이 워커가 실제로 controller가 된 것을 확인한 뒤에만 새로고침한다(⑦)
+    let target = null;
+    // 시작 화면 자동 교체 뒤 버전 확인이 늦으면 주기 작업에서 다시 확인한다(⑦)
+    let autoTarget = null;
+    const api = window.__hwUpdate = { state: "none", version: "", apply: manualApply };
+    function setState(state, version) {
+      if (api.state === state && api.version === version) return;
+      api.state = state; api.version = version;
+      try { window.dispatchEvent(new CustomEvent("hw-update", {detail: {state, version}})); } catch (_) {}
+    }
     // 게임을 시작하기 전(불러오는 중·시작 화면)만 새로고침해도 안전하다
     const safe = () => !!(window.__hw && !window.__hw.started);
 
@@ -204,7 +218,12 @@
         }
         const data = await message(worker, "status");
         if (worker !== (navigator.serviceWorker.controller || (registration && registration.active))) return;
-        show(data.ready ? "오프라인 준비 완료 · v" + data.version.slice(0, 6) : UNAVAILABLE);
+        let text = data.ready ? "오프라인 준비 완료 · v" + data.version.slice(0, 6) : UNAVAILABLE;
+        // 이미 설치된 앱이 새 버전을 받는 중이면 기다리면 된다는 것을 알려 준다(받기가 끝나거나 실패하면 이 문구는 사라짐)
+        if (registration && registration.installing && navigator.serviceWorker.controller) {
+          text = "새 버전 받는 중… 다 받으면 자동으로 바뀝니다 (게임을 시작했다면 메뉴 → [지금 업데이트])";
+        }
+        show(text);
       } catch (_) { show(UNAVAILABLE); }
       finally { checking = false; }
     }
@@ -230,10 +249,64 @@
           lockStart(true);
           const result = await message(worker, "apply");
           if (!result || !result.applied) lockStart(false);
-          else setTimeout(() => { if (!reloading) lockStart(false); }, 10000);
+          else setTimeout(() => { if (!reloading && !autoTarget) lockStart(false); }, 10000);
         }
       } catch (_) { lockStart(false); }
       finally { applying = false; }
+    }
+
+    // 게임 중(시작 화면이 아님)에 기다리는 새 버전이 다 받아졌는지 확인해 게임에 알린다
+    async function checkWaiting() {
+      if (api.state === "applying" || reloading) return;
+      const worker = registration && registration.waiting;
+      if (!worker || safe()) { setState("none", ""); return; }
+      try {
+        const data = await message(worker, "status");
+        if (worker !== registration.waiting || api.state === "applying") return;
+        setState(data.ready ? "ready" : "none", data.ready ? data.version : "");
+      } catch (_) {}
+    }
+
+    // 수동 교체 마무리: controller가 요청한 그 워커가 됐을 때만. 거래 저장 대기 중이면 다음에 다시(주기 작업).
+    // 게임을 다시 하던 중에 늦게 바뀌어도 지금 기록을 한 번 더 저장한 뒤 새로고침한다
+    function finishManual() {
+      if (!target || reloading || navigator.serviceWorker.controller !== target.worker) return false;
+      const hw = window.__hw;
+      if (hw && hw.pending) return false;
+      try { if (hw && hw.started && hw.persist) hw.persist("update"); } catch (_) {}
+      try { sessionStorage.setItem("hwantasy-reloaded-" + target.version, "1"); } catch (_) {}
+      reloading = true;
+      location.reload();
+      return true;
+    }
+
+    // [지금 업데이트]: 게임이 먼저 저장한 뒤 부른다. 알린 그 버전일 때만 바꾼다
+    async function manualApply() {
+      if (applying || reloading || api.state !== "ready") return {ok: false, reason: "busy"};
+      const worker = registration && registration.waiting;
+      if (!worker) { setState("none", ""); return {ok: false, reason: "gone"}; }
+      const version = api.version;
+      applying = true;
+      setState("applying", version);
+      try {
+        const result = await message(worker, "apply:" + version);
+        if (!result || !result.applied) {
+          setState("ready", version);
+          return {ok: false, reason: (result && result.reason) || "apply-failed"};
+        }
+        target = {worker, version};
+      } catch (_) {
+        // 대답이 늦은 것은 거절이 아니다: 늦게라도 그 워커로 바뀌면 finishManual이 처리
+        target = {worker, version};
+      } finally { applying = false; }
+      // 'applied'는 교체 요청을 받았다는 뜻 — 실제 controller가 바뀔 때까지 10초 기다린다
+      for (let i = 0; i < 40 && !reloading; i++) {
+        if (finishManual()) return {ok: true};
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      if (reloading) return {ok: true};
+      setState(registration.waiting === worker ? "ready" : "none", registration.waiting === worker ? version : "");
+      return {ok: false, reason: "no-answer"};
     }
 
     async function update() {
@@ -251,8 +324,12 @@
       hadController = !!navigator.serviceWorker.controller;
       try {
         const worker = navigator.serviceWorker.controller;
-        if (existed && worker && safe() && !reloading) {
+        if (finishManual()) return;
+        if (existed && worker && safe() && !reloading) autoTarget = worker;
+        if (autoTarget && autoTarget === worker && safe() && !reloading) {
           const data = await message(worker, "status");
+          // 대답을 받았으면 다시 확인할 필요 없음(대답이 없을 때만 주기 작업이 다시 확인)
+          autoTarget = null;
           if (data.ready && safe() && worker === navigator.serviceWorker.controller) {
             const key = "hwantasy-reloaded-" + data.version;
             // 같은 버전으로 두 번 새로고침하지 않게 표시한다. sessionStorage를 못 쓰면 그래도 한 번은 새로고침한다
@@ -267,6 +344,7 @@
           }
         }
       } catch (_) {}
+      if (autoTarget && (autoTarget !== navigator.serviceWorker.controller || !safe())) autoTarget = null;
       await status();
       await applyWaiting();
     }
@@ -286,6 +364,7 @@
             if (!worker) return;
             worker.addEventListener("statechange", () => {
               status().catch(() => {});
+              checkWaiting().catch(() => {});
               applyWaiting().catch(() => {});
             });
           } catch (_) {}
@@ -298,7 +377,11 @@
         window.addEventListener("online", () => { update().catch(() => {}); });
         // Retry a deferred application when the player returns to title/select
         // or another window closes; polling never calls registration.update().
-        setInterval(() => { status().catch(() => {}); applyWaiting().catch(() => {}); }, 1500);
+        setInterval(() => {
+          if (finishManual()) return;
+          if (autoTarget) { controllerChanged().catch(() => {}); return; }
+          status().catch(() => {}); applyWaiting().catch(() => {}); checkWaiting().catch(() => {});
+        }, 1500);
         await status();
         await applyWaiting();
         await update();

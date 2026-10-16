@@ -95,6 +95,7 @@ function startGame(save, isNew) {
   placeUnderHud();
   G.pause.delete('title');
   if (isNew) G.persist('new');
+  syncUpdate(true);
   hud.rates(G.save.rates);
   G.scene?.enterGame(isNew);
 }
@@ -105,6 +106,7 @@ $('btnBag').onclick = () => { if (G.started && !G.pending) G.ui.open('bag'); };
 $('btnInfo').onclick = () => { if (G.started && !G.pending) G.ui.open('me'); };
 $('btnMap').onclick = () => { if (G.started && !G.pending) G.ui.open('map'); };
 $('btnMenu').onclick = () => {
+  syncUpdate(false);
   $('menu').hidden = false; $('ioBox').hidden = true; G.pause.add('menu');
   $('menuRate').textContent = G.save ? `(경험치 ×${G.save.rates.exp} · 드랍 ×${G.save.rates.drop} · 돈 ×${G.save.rates.gold} · 강화 ×${G.save.rates.enchant})` : '';
   $('btnRates').hidden = !G.started;
@@ -154,6 +156,46 @@ $('btnImport').onclick = () => {
   };
 };
 $('ioClose').onclick = () => { $('ioBox').hidden = true; };
+
+// ---------- 지금 업데이트(2026-10-17 대표님) ----------
+// 게시본(홈 화면 앱)의 register.js가 window.__hwUpdate {state, version, apply}를 두고 바뀔 때 'hw-update'를 보낸다.
+// 게임 중 새 버전이 다 받아지면 메뉴 버튼에 '새' 표시 + 메뉴 안 [지금 업데이트]. 누르면 저장한 뒤 바꾸고 새로고침(시작 화면에서 [이어하기]).
+const UPDATE_FAIL = {
+  'window-count': '다른 창(탭)에도 게임이 열려 있어 지금 바꿀 수 없습니다. 다른 창을 닫고 다시 눌러 주세요',
+  'no-answer': '새 버전 확인이 늦어지고 있습니다. 잠시 뒤 다시 누르거나 앱을 닫고 다시 열어 주세요',
+};
+function syncUpdate(announce) {
+  const u = window.__hwUpdate;
+  const ready = !!u && G.started && (u.state === 'ready' || u.state === 'applying');
+  $('menuBadge').hidden = !ready;
+  $('btnUpdate').hidden = !ready;
+  if (!ready) return;
+  $('updVer').textContent = `v${u.version.slice(0, 6)}`;
+  const busy = u.state === 'applying' || G.updating;
+  $('btnUpdate').disabled = busy;
+  $('updLabel').textContent = busy ? '새 버전으로 바꾸는 중…' : '지금 업데이트';
+  if (announce && u.state === 'ready' && G.updateToast !== u.version) {
+    G.updateToast = u.version;
+    hud.toast('새 버전이 준비됐습니다 — 메뉴 → [지금 업데이트]', 3500);
+  }
+}
+addEventListener('hw-update', () => syncUpdate(true));
+$('btnUpdate').onclick = async () => {
+  const u = window.__hwUpdate;
+  if (!u || u.state !== 'ready' || G.updating || !G.started) return;
+  if (G.pending) { hud.toast('저장이 끝나지 않은 일이 있습니다'); return; }
+  if (G.lockedByOtherTab) { hud.toast(UPDATE_FAIL['window-count'], 3500); return; }
+  if (!storage) { hud.toast('이 폰에서는 기록을 저장할 수 없어 업데이트하면 기록이 사라집니다. 먼저 [저장 내보내기]로 보관해 주세요', 4500); return; }
+  G.updating = true; G.pause.add('update');
+  syncUpdate(false);
+  // 저장 실패면 저장 실패 창이 뜨고(그 멈춤은 그대로 둠) 업데이트만 멈춘다
+  if (!G.persist('update')) { G.updating = false; G.pause.delete('update'); syncUpdate(false); return; }
+  const r = await u.apply();
+  if (r.ok) return; // 곧 새로고침
+  G.updating = false; G.pause.delete('update');
+  syncUpdate(false);
+  hud.toast(UPDATE_FAIL[r.reason] || '지금은 바꾸지 못했습니다. 앱을 닫고 다시 열면 새 버전이 됩니다', 4000);
+};
 
 // ---------- 저장 ----------
 G.persist = (why) => {
