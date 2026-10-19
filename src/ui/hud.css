@@ -46,6 +46,23 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .small { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; font-size: 13px; }
 
 .log { position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); top: var(--log-top, calc(env(safe-area-inset-top, 0px) + 34px)); font-size: 12px; line-height: 1.55; max-width: 46vw; overflow-wrap: anywhere; pointer-events: none; text-shadow: 0 1px 2px #000, 0 0 2px #000; }
+.leftcol { position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); top: var(--log-top, calc(env(safe-area-inset-top, 0px) + 34px)); max-width: 46vw; pointer-events: none; }
+.leftcol * { pointer-events: none !important; }
+.leftcol .log { position: static; max-width: none; }
+/* 12차 사냥 목표판: 2줄 고정(알림 줄이 늘어도 판이 흔들리지 않게 판이 위), 긴 이름은 말줄임 */
+.quest { display: inline-block; max-width: 42vw; margin-bottom: 4px; padding: 3px 8px 3px 6px; border-left: 3px solid #9fe870; background: rgba(20, 22, 31, 0.84); border-radius: 0 6px 6px 0; font-size: 12px; line-height: 1.45; text-shadow: 0 1px 2px #000; }
+.quest[hidden] { display: none; }
+/* ⑦ #3: 목표 줄은 몬스터 이름만 말줄임(숫자는 항상 보임), 기록 줄은 좁으면 두 줄 */
+.quest .qgoal { display: flex; align-items: center; white-space: nowrap; }
+.quest .qgoal > * { flex: none; }
+.quest .qgoal .qmon { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.quest .qrec { white-space: normal; }
+.quest .qgoal b { color: #9fe870; margin-right: 4px; }
+.quest .qgoal .qn { font-variant-numeric: tabular-nums; color: #fff; font-weight: 700; }
+.quest .qgoal .qbar { display: inline-block; width: 44px; height: 4px; margin: 0 5px 2px; vertical-align: middle; background: rgba(255,255,255,.18); border-radius: 2px; overflow: hidden; }
+.quest .qgoal .qbar i { display: block; height: 100%; background: #9fe870; }
+.quest .qgoal em { font-style: normal; color: var(--gold); font-size: 11px; margin-left: 4px; }
+.quest .qrec { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .log div { opacity: .95; }
 .log div.old { opacity: .55; }
 .toast { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--gold); border-radius: 6px; padding: 8px 16px; font-size: 14px; pointer-events: none; text-align: center; max-width: 80vw; z-index: 20; } /* 2026-10-16: 메뉴·창(.screen z5·#win z6) 위로 */
@@ -393,3 +410,41 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .morphrow.locked { opacity: .55; }
 .mdot { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
 .morphlist { margin-top: 6px; }
+
+/* ---------- 12차 도감·칭호 ---------- */
+.cxsum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; margin: 2px 0 6px; background: linear-gradient(90deg, rgba(224,166,62,.18), rgba(224,166,62,.04)); border: 1px solid rgba(224,166,62,.5); border-radius: 8px; }
+.cxsum b { color: var(--gold); font-size: 15px; }
+.cxsum span { font-size: 13px; }
+.cxsum .act { margin-left: auto; }
+.cxgroup { margin: 12px 2px 4px; font-size: 13px; color: var(--muted); font-weight: 700; letter-spacing: .02em; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+.cxrow { padding: 6px 10px; margin: 4px 0; background: rgba(0,0,0,.3); border: 1px solid rgba(239,228,200,.12); border-radius: 6px; }
+.cxrow.done { border-color: rgba(159,224,138,.55); background: rgba(159,224,138,.08); }
+.cxhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cxhead em { font-style: normal; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cxhead .cxfx { font-size: 12px; color: #ffe08a; }
+.cxhead .act, .cxhead .ok-t { margin-left: auto; }
+.cxslots { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+.cxslot { position: relative; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 6px; background: rgba(0,0,0,.35); border: 1px solid rgba(239,228,200,.15); }
+.cxslot .ic { width: 26px; height: 26px; opacity: .28; filter: grayscale(1); }
+.cxslot.can { border-color: #ffd34a; box-shadow: 0 0 0 1px rgba(255,211,74,.4) inset; }
+.cxslot.can .ic { opacity: .8; filter: none; }
+.cxslot.on { border-color: rgba(159,224,138,.7); background: rgba(159,224,138,.12); }
+.cxslot.on .ic { opacity: 1; filter: none; }
+.cxslot i { position: absolute; right: -3px; bottom: -4px; font-style: normal; font-size: 11px; color: #9fe08a; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.cxconfirm { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--gold); border-radius: 6px; background: rgba(224,166,62,.1); }
+.cxconfirm p { margin: 0 0 6px; font-size: 13px; }
+.cxconfirm .cxlist { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 8px; font-size: 13px; }
+.cxconfirm .row { display: flex; gap: 8px; }
+.ttrow { padding: 6px 10px; margin: 4px 0; background: rgba(0,0,0,.3); border: 1px solid rgba(239,228,200,.12); border-radius: 6px; }
+.tthead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.tthead em { font-style: normal; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ttchips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ttchips.ttwide { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.ttchip { display: flex; flex-direction: column; gap: 2px; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(239,228,200,.12); background: rgba(0,0,0,.25); opacity: .6; font-size: 12px; }
+.ttchip b { font-size: 13px; }
+.ttchip small { color: #ffe08a; font-size: 11px; }
+.ttchip em { font-style: normal; }
+.ttchip .act { padding: 3px 8px; font-size: 12px; align-self: flex-start; }
+.ttchip.got { opacity: 1; border-color: rgba(240,200,96,.5); }
+.ttchip.using { border-color: #9fe08a; background: rgba(159,224,138,.12); }
+.ttchip.fresh { box-shadow: 0 0 0 2px rgba(240,200,96,.6); }

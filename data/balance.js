@@ -159,6 +159,34 @@ const monsters = rows.map(([id, name, level, hp, atk, def, exp, base, mapId, isB
   drops: drops.map(drop => (drop.pool ? { ...drop, pool: [...drop.pool] } : { ...drop })),
 }));
 
+// 12차 도감: 세트를 이루는 +0 장비를 넣으면 가방에서 사라지고, 세트를 **다 채우면** 효과(부분 효과 없음).
+// 저장은 save.codex[세트 id] = 넣은 아이템 id 목록 — 세트 id·아이템 id는 지우거나 바꾸지 않는다(칸을 더하면 저장 버전을 올린다).
+// 한 아이템은 도감 전체에서 한 세트에만 들어간다(tests/phase12가 확인)
+const SET_NAMES = ['모험가', '숲지기', '광부', '미스릴 기사'];
+const BODY_ARMORS = ['leatherArmor', 'chainArmor', 'plateArmor', 'mithrilArmor'];
+const STEP2 = [1, 1, 2, 2];
+const CODEX = [
+  ...WEAPON_TIERS.map(([pre, name], i) => ({ id: `wpn${i + 1}`, name: `${name} 무기 모음`, items: ['Sword', 'Greatsword', 'Axe', 'Spear', 'Dagger'].map(s => pre + s), fx: { dmg: STEP2[i] } })),
+  ...SET_NAMES.map((name, i) => ({ id: `top${i + 1}`, name: `${name} 머리·몸`, items: ['helm', 'shirt', 'cloak', 'gloves'].map(s => `${s}${i + 1}`), fx: { hp: 10 * (i + 1) } })),
+  ...SET_NAMES.map((name, i) => ({ id: `low${i + 1}`, name: `${name} 허리·다리`, items: ['belt', 'pants', 'boots'].map(s => `${s}${i + 1}`), fx: { def: STEP2[i] } })),
+  ...WEAPON_TIERS.map(([, name, sword], i) => ({ id: `rare${i + 1}`, name: `빛나는 ${name} 장비`, items: [`${sword}_r`, `${BODY_ARMORS[i]}_r`, `helm${i + 1}_r`], fx: { hit: STEP2[i], expPct: STEP2[i] } })),
+  { id: 'body', name: '갑옷 수집', items: BODY_ARMORS, fx: { hp: 30, def: 1 } },
+  { id: 'lich', name: '기사왕의 유품', items: ['wraithSword', 'wraithArmor'], fx: { dmg: 2, def: 2, hp: 30, goldPct: 5 } },
+];
+// 12차 칭호(하나만 씀): 일반 몬스터마다 I 100·II 500·III 2000마리, 효과는 사냥터 종류별 × 단계. 보스 1회, 도감 세트 완성 수.
+// 얻은 목록은 저장하지 않고 처치 수·도감에서 계산한다(처치 수는 줄지 않음)
+const TITLE_STEPS = [[100, 'I'], [500, 'II'], [2000, 'III']];
+const TITLE_FX = { field: k => ({ hp: 10 * k }), forest: k => ({ hit: k }), mine: k => ({ def: k }), ruin: k => ({ dmg: k }) };
+const TITLES = [
+  ...monsters.filter(m => !m.isBoss).flatMap(m => TITLE_STEPS.map(([need, roman], k) => ({ id: `${m.id}${k + 1}`, name: `${m.name} 사냥꾼 ${roman}`, kind: 'kills', mon: m.id, need, fx: TITLE_FX[m.mapId](k + 1) }))),
+  { id: 'bossSlayer', name: '큰울림 사냥꾼', kind: 'kills', mon: 'boss', need: 1, fx: { def: 2, hp: 20 } },
+  { id: 'lichSlayer', name: '기사왕 처단자', kind: 'kills', mon: 'lich', need: 1, fx: { dmg: 3, def: 2 } },
+  ...[[5, 'I', 2], [10, 'II', 4], [15, 'III', 6]].map(([need, roman, pct], i) => ({ id: `collector${i + 1}`, name: `수집가 ${roman}`, kind: 'codex', need, fx: { expPct: pct } })),
+];
+// 12차 사냥 목표판: 일반 몬스터 N마리(사냥터별). 첫 완료 = 몬스터 N마리분 × firstRate, 반복 = 경험치 × repeatExp·돈 × repeatGold
+// 시뮬레이터(예상 시간 표)는 도감·칭호·목표판을 쓰지 않는다(정비 때 ▲ 아닌 장비는 따로 팔아 도감 보호와 무관) → 실제 게임이 조금 빠름
+const QUEST = { count: { field: 30, forest: 40, mine: 50, ruin: 60 }, firstRate: 0.5, repeatExp: 0.1, repeatGold: 0.2, aheadLevels: 3, killsMax: 1e12 };
+
 export default {
   version: 1,
   // 5차(스킬·돈 ×2.5): a=155, 성터 경험치 ×1.08 → 시뮬레이터 3회 1→30 10.12h, 30→40 9.85h, 합 19.97h(게임 시계).
@@ -265,6 +293,10 @@ export default {
     { tier: 3, name: '광부', stages: [[3, { hp: 30 }], [5, { def: 3 }], [7, { dmg: 3, crit: 4 }]] },
     { tier: 4, name: '미스릴 기사', stages: [[3, { hp: 45 }], [5, { def: 4 }], [7, { dmg: 4, crit: 5 }]] },
   ],
+  // 12차 도감·칭호·사냥 목표판(위 CODEX·TITLES·QUEST)
+  codex: CODEX,
+  titles: TITLES,
+  quest: QUEST,
   // walkSpeed: 기사 걸음(px/초, World SPEED) — 시뮬레이터 돌진이 줄이는 걷기 시간 계산용
   simulation: { walkSpeed: 70, walkSec: 3.5, serviceSec: 60, potionStock: 200, seed: 20261011 },
 };

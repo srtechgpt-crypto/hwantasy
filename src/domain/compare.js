@@ -7,6 +7,7 @@ import { playerStats } from './progression.js';
 import { applyBuffs } from './buffs.js';
 import { applyMorph, morphExtra } from './morph.js';
 import { baseDamage, finalDamage } from './combat.js';
+import { permOf } from './collect.js';
 
 // 6차 점수(정의만으로, 레벨 무관) — 옛 시험·간단한 정렬용. 10차 무기 = (평균 + 강화 피해) × (100 + 피해%)/(100 + 간격%) × (1 + 치명%/200) + 명중%×0.3
 export function gearScore(id, enchant, bal) {
@@ -53,7 +54,7 @@ export function loadoutStats(save, bal, slot = null, item = undefined) {
   const equip = Object.fromEntries(EQUIP_SLOTS.map(s => [s, save.bag.find(i => i.uid === save.equip?.[s]) ?? null]));
   if (slot) equip[slot] = item ?? null;
   // 11차: 변신 무작위 힘·민첩은 원래 능력치에, 그다음 버프, 그다음 변신 효과(간격은 같은 atkMul에 곱함) — 게임 화면·비교·창이 모두 이 함수
-  const st = playerStats(save.player.level, equip, bal, save.player.bonus, save.morph?.cur ? morphExtra(save.morph) : null);
+  const st = playerStats(save.player.level, equip, bal, save.player.bonus, save.morph?.cur ? morphExtra(save.morph) : null, permOf(save, bal)); // 12차 도감·칭호
   return applyMorph(applyBuffs(st, save.buffs, save.player.level, bal), save.morph, bal);
 }
 // 이 장비를 그 칸에 끼었을 때의 점수(무기 = 초당 피해, 방어구 = 전투력). 장비가 아니면 null

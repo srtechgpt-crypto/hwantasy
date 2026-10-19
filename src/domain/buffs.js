@@ -30,9 +30,14 @@ export function applyBuffs(stats, buffs, level, bal) {
 
 // 처치 경험치에 경험치 두루마리 반영(배율 적용 뒤, 내림)
 export function buffedExp(exp, buffs, bal) {
+  const pct = scrollExpPct(buffs, bal);
+  return pct ? Math.floor((exp * (100 + pct)) / 100) : exp;
+}
+// 12차: 켜진 경험치 두루마리 % 합(도감·칭호 경험치%와 더해서 한 번 곱함 — collect.bonusExp)
+export function scrollExpPct(buffs, bal) {
   let pct = 0;
   for (const [id, ms] of Object.entries(buffs ?? {})) { const d = buffDef(id, bal); if (d?.expPct && ms > 0) pct += d.expPct; }
-  return pct ? Math.floor((exp * (100 + pct)) / 100) : exp;
+  return pct;
 }
 
 // 시간 흐름: 정수 dtMs만큼 모든 버프를 줄이고 0 이하는 지운다(⑤ #6: 소수 ms는 부르는 쪽이 모아 정수로 넘김 — 저장값은 항상 정수).

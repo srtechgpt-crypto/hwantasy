@@ -4,6 +4,7 @@ import { needExp, playerStats, bonusPoints, validBonus } from './progression.js'
 import { defaultHotbar, validHotbar } from './hotbar.js';
 import { validBuffs } from './buffs.js';
 import { validMorph, emptyMorph } from './morph.js';
+import { validCodex, validKills, validQuest, validTitle, firstQuest, permOf } from './collect.js';
 
 // 저장 형식 버전. 2 = 2026-10-13 경험치 곡선 변경(초반 빠르게). 1 → 2는 '현재 레벨에서 채운 비율'로 변환한다.
 // 3 = 2026-10-14 4차: 보스 두 마리(boss → bosses 맵), 최대 레벨 40. 2 → 3은 v2 규칙으로 전부 검사한 뒤에만 바꾼다.
@@ -13,7 +14,9 @@ import { validMorph, emptyMorph } from './morph.js';
 //     (9차 패시브는 최대 체력을 늘리기만 하므로 v4 기록의 hp는 지금 규칙으로도 범위 안)
 // 6 = 2026-10-16 10차: save.buffs(버프 남은 시간). 아이템은 늘기만(무기 계열·희귀·쓰는 아이템). 5 → 6은 v5 규칙으로 검사한 뒤 buffs {}만 더한다
 // 7 = 2026-10-16 11차: save.morph(변신 상태). 아이템은 늘기만(고급·하락·변신 주문서). 6 → 7은 v6 고정 규칙으로 검사한 뒤 morph 기본값만 더한다
-export const SAVE_VERSION = 7;
+// 8 = 2026-10-19 12차: save.codex(도감)·kills(처치 수)·title(쓰는 칭호)·quest(사냥 목표). 7 → 8은 v7 고정 규칙(계수 176, 도감·칭호 없음)으로 검사한 뒤
+//     기본값만 더한다(보스 처치 시각이 남아 있으면 그 보스 처치 수 1)
+export const SAVE_VERSION = 8;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
@@ -21,7 +24,8 @@ export const V3_BACKUP_KEY = 'hwantasy.v3backup';
 export const V4_BACKUP_KEY = 'hwantasy.v4backup';
 export const V5_BACKUP_KEY = 'hwantasy.v5backup';
 export const V6_BACKUP_KEY = 'hwantasy.v6backup';
-const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY };
+export const V7_BACKUP_KEY = 'hwantasy.v7backup';
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 // 버전 1 때의 경험치 공식(고정): round(72 × L^2.15). 변환 전 v1 검사·비율 계산에만 쓴다
@@ -79,7 +83,11 @@ function v5Bal(bal) {
   return { ...bal, weapons: keep(bal.weapons), armors: keep(bal.armors), consumables: keep(bal.consumables), hotbarItems: V5_HOTBAR_ITEMS,
     progression: { ...bal.progression, ...V5_PROGRESSION } };
 }
+// v7(11차 게시본) 고정 규칙(⑤ #2): 경험치 계수 176. 아이템·체력 공식은 12차에 줄지 않음, 도감·칭호 효과는 v7 기록에 없음(statsOf가 version으로 0)
+const V7_PROGRESSION = { coefficient: 176 };
+const v7Bal = bal => ({ ...bal, progression: { ...bal.progression, ...V7_PROGRESSION } });
 export const balFor = (bal, version) => (version === SAVE_VERSION ? bal
+  : version === 7 ? v7Bal(bal)
   : version === 6 ? v6Bal(bal)
   : version === 5 ? v5Bal(bal)
   : version === 4 ? { ...v5Bal(bal), progression: { ...bal.progression, ...V4_PROGRESSION } } : legacyBal(bal, version));
@@ -101,16 +109,19 @@ export function newGame(bal) {
     rates: { exp: 1, drop: 1, gold: 1, enchant: 1 },
     bosses: Object.fromEntries(V3_BOSSES.map(id => [id, null])), nextUid: bag.length + 1,
   };
-  save.player.hp = statsOf(save, bal).maxHp;
+  // 12차(⑤ #5): 새 필드를 먼저 넣고 체력을 계산한다
   save.hotbar = defaultHotbar(1, bal);
   save.buffs = {};
   save.morph = emptyMorph();
+  Object.assign(save, newCollect(1, bal));
+  save.player.hp = statsOf(save, bal).maxHp;
   return save;
 }
-// 8차: 저장의 장착 장비·보너스로 계산한 능력치(v4 형식만)
+const newCollect = (level, bal) => ({ codex: {}, kills: {}, title: null, quest: firstQuest(level, bal) });
+// 8차: 저장의 장착 장비·보너스로 계산한 능력치(v4 형식만). 12차: v8부터 도감·칭호 영구 효과(v7 이하는 0 — ⑤ #2·#5)
 export function statsOf(save, bal) {
   const equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, save.bag.find(item => item.uid === save.equip[slot]) ?? null]));
-  return playerStats(save.player.level, equip, bal, save.player.bonus);
+  return playerStats(save.player.level, equip, bal, save.player.bonus, null, save.version >= 8 ? permOf(save, bal) : null);
 }
 // 8차(⑤ #2): 거래 마무리 — 최종 장비·능력치로 최대 체력을 다시 계산해 hp를 그 안으로(장비·체력 능력치가 빠져 최대가 줄 때)
 export function settleHp(save, bal) {
@@ -176,11 +187,6 @@ export function validate(save, bal, version = SAVE_VERSION) {
       used.add(uid);
     }
   }
-  // 8차: 최대 체력은 장비·체력 능력치에 따라 달라진다 — 다른 검사가 모두 통과했을 때만 계산해 hp 범위를 본다
-  if (version >= 4 && errors.length === 0 && equipOk) {
-    try { if (p.hp > statsOf(save, bal).maxHp) bad('체력이 올바르지 않습니다'); }
-    catch { bad('장비 정보가 올바르지 않습니다'); }
-  }
   if (!isRecord(save.rates) || Object.keys(bal.rates).some(key => !bal.rates[key].includes(save.rates[key]))) bad('배율이 올바르지 않습니다');
   if (version >= 5) { try { if (!levelOk || !validHotbar(save.hotbar, p.level, bal)) bad('단축 칸이 올바르지 않습니다'); } catch { bad('단축 칸이 올바르지 않습니다'); } }
   else if ('hotbar' in save) bad('옛 버전 기록에 단축 칸이 있습니다');
@@ -188,6 +194,14 @@ export function validate(save, bal, version = SAVE_VERSION) {
   else if ('buffs' in save) bad('옛 버전 기록에 버프가 있습니다');
   if (version >= 7) { if (!validMorph(save.morph, bal)) bad('변신 기록이 올바르지 않습니다'); }
   else if ('morph' in save) bad('옛 버전 기록에 변신이 있습니다');
+  // 12차(⑤ #6): 도감·처치 수·칭호·목표. 칭호 자격은 도감·처치 수가 정상일 때만 본다
+  if (version >= 8) {
+    const codexOk = validCodex(save.codex, bal), killsOk = validKills(save.kills, bal);
+    if (!codexOk) bad('도감 기록이 올바르지 않습니다');
+    if (!killsOk) bad('처치 기록이 올바르지 않습니다');
+    if (!(codexOk && killsOk && validTitle(save.title, save, bal))) bad('칭호가 올바르지 않습니다');
+    if (!killsOk || !validQuest(save.quest, save.kills, bal)) bad('사냥 목표가 올바르지 않습니다');
+  } else if (['codex', 'kills', 'title', 'quest'].some(k => k in save)) bad('옛 버전 기록에 도감·칭호·목표가 있습니다');
   const bossTime = at => at === null || integer(at);
   if (version < 3) {
     if (!isRecord(save.boss) || !bossTime(save.boss.defeatedAt)) bad('보스 처치 시각이 올바르지 않습니다');
@@ -197,6 +211,11 @@ export function validate(save, bal, version = SAVE_VERSION) {
     if (!isRecord(b) || Object.getPrototypeOf(b) !== Object.prototype || keys.length !== V3_BOSSES.length
       || V3_BOSSES.some(id => !Object.hasOwn(b, id) || !bossTime(b[id]))) bad('보스 처치 시각이 올바르지 않습니다');
     if ('boss' in save && save.boss !== undefined) bad('옛 보스 기록이 남아 있습니다');
+  }
+  // 8차: 최대 체력은 장비·체력 능력치(12차: 도감·칭호)에 따라 달라진다 — 다른 검사가 모두 통과했을 때만 맨 끝에 계산해 hp 범위를 본다(⑤ #5)
+  if (version >= 4 && errors.length === 0 && equipOk) {
+    try { if (p.hp > statsOf(save, bal).maxHp) bad('체력이 올바르지 않습니다'); }
+    catch { bad('장비 정보가 올바르지 않습니다'); }
   }
   return { ok: errors.length === 0, errors };
 }
@@ -292,24 +311,43 @@ function v6to7(save, bal) {
   const next = clone(save);
   next.version = 7;
   next.morph = emptyMorph();
+  // 12차: 목표는 v7 고정 규칙(다음 단계 v7→v8 검사를 통과하고 거기서 다시 비율 변환)
+  const v7 = balFor(bal, 7), p = next.player;
+  if (p.level < v7.progression.maxLevel && needExp(p.level, old) !== needExp(p.level, v7)) {
+    const need = needExp(p.level, v7);
+    p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
+  } else if (p.level >= v7.progression.maxLevel) p.exp = 0;
+  return settleHp(next, v7);
+}
+// 7→8(⑤ #1·#20): v7 고정 규칙으로 전부 검사한 뒤 도감·처치 수·칭호·목표 기본값을 더한다. 처치 수는 업데이트 뒤부터 세고,
+// 보스는 처치 시각이 남아 있으면 1회로 이어 준다. 경험치 계수가 바뀌었으면 비율 변환. 도감·칭호가 비어 최대 체력은 v7과 같다
+function v7to8(save, bal) {
+  const old = balFor(bal, 7);
+  const check = validate(save, old, 7);
+  if (!check.ok) throw new TypeError(`버전 7 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 8;
   const p = next.player;
   if (p.level < bal.progression.maxLevel && needExp(p.level, old) !== needExp(p.level, bal)) {
     const need = needExp(p.level, bal);
     p.exp = Math.min(need - 1, Math.round((p.exp / needExp(p.level, old)) * need));
   } else if (p.level >= bal.progression.maxLevel) p.exp = 0;
+  Object.assign(next, newCollect(p.level, bal));
+  for (const id of V3_BOSSES) if (next.bosses[id] !== null && bal.monsters.some(m => m.id === id)) next.kills[id] = 1;
   return settleHp(next, bal);
 }
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   if (save.version === SAVE_VERSION) return clone(save);
-  if (![1, 2, 3, 4, 5, 6].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
+  if (![1, 2, 3, 4, 5, 6, 7].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
   let next = save;
   if (next.version === 1) next = v1to2(next, bal);
   if (next.version === 2) next = v2to3(next, bal);
   if (next.version === 3) next = v3to4(next, bal);
   if (next.version === 4) next = v4to5(next, bal);
   if (next.version === 5) next = v5to6(next, bal);
-  return v6to7(next, bal);
+  if (next.version === 6) next = v6to7(next, bal);
+  return v7to8(next, bal);
 }
 // 지원하는 버전보다 새 기록(앱을 옛 버전으로 되돌린 경우 등)인지
 function futureVersion(raw) {

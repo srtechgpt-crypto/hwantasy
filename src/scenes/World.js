@@ -16,7 +16,8 @@ import { createSkillFx } from '../ui/skillfx.js';
 import { compareGear, loadoutStats } from '../domain/compare.js';
 import { morphDef, tickMorph, rollText } from '../domain/morph.js';
 import { statsOf } from '../domain/save.js';
-import { applyBuffs, buffedExp, tickBuffs, buffDef, buffOfItem } from '../domain/buffs.js';
+import { applyBuffs, scrollExpPct, tickBuffs, buffDef, buffOfItem } from '../domain/buffs.js';
+import * as col from '../domain/collect.js';
 import { createJoystick } from '../ui/joystick.js';
 import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
@@ -353,6 +354,10 @@ export class WorldScene extends Phaser.Scene {
     this.clearMonsters();
     this.spawnAll();
     this.refreshGear();
+    // 12차: 이번 사냥 기록(저장 안 함, 게임에 들어갈 때 한 번 0 — ⑤ #23), 이번 실행에서 새로 얻은 칭호('!')
+    this.rec = { kills: 0, exp: 0, gold: 0, items: 0 };
+    this.newTitles = new Set();
+    this.titleLook();
     this.playing = true;
     hud.log(isNew ? '바람 마을에 도착했습니다. 마을 사람들에게 다가가 [대화]를 눌러 보세요.' : `다시 오셨습니다. Lv ${p.level} 기사`);
     this.refreshHud(true);
@@ -670,6 +675,41 @@ export class WorldScene extends Phaser.Scene {
       G.persist('morphEnd');
     }
   }
+  // ---------- 12차 칭호·목표판 ----------
+  // 머리 위 칭호(금색 작은 글씨, 변신하면 변신 이름 위)
+  titleLook() {
+    const t = G.save?.title ? col.titleDef(G.save.title, bal) : null;
+    if (!this.titleLabel) this.titleLabel = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '6px', fontStyle: 'bold', color: '#f0c860', stroke: '#2a1a00', strokeThickness: 2, resolution: 4 }).setOrigin(0.5).setDepth(999);
+    this.titleLabel.setText(t ? `《${t.name}》` : '').setVisible(!!t);
+    this.drawHero();
+  }
+  // 처치·도감 등록 전 칭호 목록(before)과 지금을 비교해 새로 얻은 것만 한 번 알림(⑤ #21)
+  checkNewTitles(before) {
+    const had = new Set(before);
+    const fresh = col.earnedTitles(G.save, bal).filter((id) => !had.has(id));
+    for (const id of fresh) {
+      const t = col.titleDef(id, bal);
+      this.newTitles.add(id);
+      this.floatText(this.knight.x, this.knight.y - 40, `칭호 「${t.name}」`, '#f0c860', 2000);
+      hud.log(`<b style="color:#f0c860">칭호 「${t.name}」을(를) 얻었습니다</b> · ${col.fxText(t.fx)} — [정보]→[칭호]에서 쓸 수 있습니다`);
+    }
+    if (fresh.length) hud.toast(`새 칭호 「${col.titleDef(fresh[0], bal).name}」 — [정보]→[칭호]`, 2600);
+  }
+  questDone(q) {
+    const name = monName(q.mon);
+    this.floatText(this.knight.x, this.knight.y - 30, '목표 달성!', '#9fe870', 1600);
+    hud.toast(`목표 달성! ${name} — 경험치 +${q.exp.toLocaleString('ko-KR')} · 돈 +${q.gold.toLocaleString('ko-KR')}원`, 2400);
+    hud.log(`<b style="color:#9fe870">사냥 목표 달성</b> · ${name}${q.first ? '(처음)' : ''} · 경험치 +${q.exp.toLocaleString('ko-KR')} · 돈 +${q.gold.toLocaleString('ko-KR')}원 → 다음: ${monName(q.next)}`);
+  }
+  questBoard() {
+    const s = G.save, q = s.quest, r = this.rec;
+    if (!q || !r) return null;
+    return {
+      mon: monName(q.id), n: q.n, need: col.questCount(q.id, bal), first: !q.done.includes(q.id),
+      kills: r.kills, exp: r.exp * 100, gold: r.gold, items: r.items,
+    };
+  }
+
   // 겉모습: 색(tint)·발밑 빛·머리 위 이름표(그림은 그대로 — 대표님 선택 2026-10-16)
   morphLook(force = false) {
     const c = G.save?.morph?.cur, d = c ? morphDef(c.id, bal) : null, key = d?.id ?? '';
@@ -1112,23 +1152,35 @@ export class WorldScene extends Phaser.Scene {
 
     const s = G.save;
     const rw = rewards.rollRewards(m.id, s.player.level, ratesOf(s), this.rng, bal);
-    rw.exp = buffedExp(rw.exp, s.buffs, bal); // 10차: 경험치 두루마리(배율·저레벨 보정 뒤 한 번, 반격 처치도 이 길)
-    const before = s.player.level;
-    const r = prog.addExp({ level: s.player.level, exp: s.player.exp }, rw.exp, bal);
-    s.player.level = r.level; s.player.exp = r.exp;
+    // 10차 두루마리 + 12차 도감·칭호 경험치%를 더해 한 번(배율·저레벨 보정 뒤, 반격 처치도 이 길 — ⑤ #12), 돈%도 여기서
+    rw.exp = col.bonusExp(rw.exp, s, bal, scrollExpPct(s.buffs, bal));
+    rw.gold = col.bonusGold(rw.gold, s, bal);
+    const before = s.player.level, titles = col.earnedTitles(s, bal);
+    // 12차(⑤ #7·#8): 처치 수·경험치·목표 진행·목표 보상·다음 목표를 순수 함수 한 번으로 계산한 뒤 한꺼번에 옮긴다
+    // (G.save 객체는 그대로 — 이 프레임에서 G.save를 잡고 있는 다른 코드가 옛 객체를 고치지 않게)
+    const res = col.applyKill(s, m.id, rw.exp, bal);
+    Object.assign(s.player, res.save.player);
+    s.kills = res.save.kills; s.quest = res.save.quest;
+    this.rec.kills++; this.rec.exp += res.pct;
+    if (res.quest) this.rec.gold += res.quest.gold;
+    const r = { level: s.player.level };
     // 돈·아이템은 리니지처럼 그 자리에 떨어뜨린다(지나가면 줍고, 저장에 성공해야 확정)
     const mx = m.sprite.x, my = m.sprite.y;
     if (rw.gold > 0) this.dropOnGround('gold', 'gold', rw.gold, mx, my);
     for (const d of rw.drops) this.dropOnGround('item', d.id, d.count, mx, my);
     hud.log(`${m.def.name} 처치 · 경험치 +${rw.exp.toLocaleString('ko-KR')}${rw.drops.length ? ` · <span style="color:#ffe08a">${rw.drops.map((d) => nameOf(d.id)).join(', ')}이(가) 떨어졌습니다</span>` : ''}`);
+    if (res.quest) this.questDone(res.quest);
+    this.checkNewTitles(titles);
     if (r.level > before) {
       this.levelUpFx(r.level);
       G.persist('levelup');
-    }
+    } else if (res.quest) G.persist('quest'); // 목표 보상(돈·경험치)은 바로 저장
+    this.refreshHud(true);
   }
 
   // 보스: 보상 전부 + 처치 시각을 한 후보로 만들어 한 번에 저장(성공해야 확정)
   killBoss(b) {
+    if (!b.alive) return; // 12차(⑤ #9): 같은 처치로 보상·처치 수가 두 번 나오지 않게
     b.alive = false;
     this.cancelSlam(b);
     b.sprite.setVisible(false); b.bar.clear(); b.label.setVisible(false);
@@ -1136,7 +1188,9 @@ export class WorldScene extends Phaser.Scene {
     const s = G.save;
     // 처치한 보스의 id 하나로 보상 추첨·저장·후처리를 모두 한다
     const rw = rewards.rollRewards(b.id, s.player.level, ratesOf(s), this.rng, bal);
-    rw.exp = buffedExp(rw.exp, s.buffs, bal); // 10차: 경험치 두루마리
+    rw.exp = col.bonusExp(rw.exp, s, bal, scrollExpPct(s.buffs, bal)); // 10차 두루마리 + 12차 도감·칭호(더해서 한 번)
+    rw.gold = col.bonusGold(rw.gold, s, bal);
+    const was = { level: s.player.level, exp: s.player.exp }, titles = col.earnedTitles(s, bal);
     const res = inv.bossKill(s, b.id, rw, Date.now(), bal);
     if (!res.ok) { hud.toast(res.reason); b.alive = true; b.hp = 1; b.sprite.setVisible(true); b.label.setVisible(true); return; }
     const done = G.commit(res.save, 'boss', {
@@ -1150,8 +1204,14 @@ export class WorldScene extends Phaser.Scene {
         if (res.toWarehouse.length) hud.log(`<span style="color:#9fd8ff">가방이 가득해 ${josa(list(res.toWarehouse), '은/는')} 창고지기에게 맡겨 두었습니다</span>`);
         for (const d of res.ground) this.dropOnGround('item', d.id, d.count, x, y);
         if (res.ground.length) hud.toast('가방과 창고가 가득 찼습니다. 남은 것은 땅에 60초 동안 남습니다');
+        // 12차: 사냥 기록·새 칭호(저장 성공 뒤에만 — ⑤ #21·#23)
+        this.rec.kills++; this.rec.gold += rw.gold;
+        this.rec.exp += col.expProgress(was, G.save.player, bal);
+        this.rec.items += [...res.toBag, ...res.toWarehouse].reduce((a, d) => a + d.count, 0);
+        this.checkNewTitles(titles);
         if (res.levelsGained > 0) { this.levelUpFx(G.save.player.level); G.persist('levelup'); }
         this.updateBossSign();
+        this.refreshHud(true);
       },
     });
     if (!done && !G.pending) { b.alive = true; b.hp = 1; b.sprite.setVisible(true); b.label.setVisible(true); }
@@ -1288,6 +1348,7 @@ export class WorldScene extends Phaser.Scene {
       after: () => {
         for (const { g, n } of took) {
           g.count -= n;
+          if (g.kind === 'gold') this.rec.gold += n; else this.rec.items += n; // 12차: 실제로 주운 것만(⑤ #23)
           if (g.kind === 'gold') this.floatText(this.knight.x, this.knight.y - 20, `+${n.toLocaleString('ko-KR')}원`, '#ffd36a', 900);
           else { this.floatText(this.knight.x, this.knight.y - 26, nameOf(g.id), '#ffffff', 1100); hud.log(`${josa(nameOf(g.id), '을/를')} 주웠습니다`); }
           if (g.count <= 0) this.removeDrop(g);
@@ -1759,6 +1820,7 @@ export class WorldScene extends Phaser.Scene {
     const x = this.snap(k.x + this.lunge.x), y = this.snap(k.y + 2 + this.lunge.y);
     this.hero.setPosition(x, y).setDepth(10 + k.y / 1000);
     if (this.morphLabel?.visible) { this.morphLabel.setPosition(x, y - 34); this.morphRing.setPosition(x, y); }
+    if (this.titleLabel?.visible) this.titleLabel.setPosition(x, y - (this.morphLabel?.visible ? 42 : 34));
     this.cameraTarget.setPosition(this.snap(k.x), this.snap(k.y - 8));
   }
 
@@ -1839,14 +1901,16 @@ export class WorldScene extends Phaser.Scene {
     hud.update({
       level: lv, hp: s.player.hp, maxHp: st.maxHp, expPct: maxLevel ? 100 : (100 * s.player.exp) / need, maxLevel,
       gold: s.player.gold, potions: inv.potionCount(s, bal), scrolls: countOf(s, 'returnScroll'),
-      notice: inv.unspentPoints(s, bal) > 0 || inv.readyRewards(s, bal).length > 0,
+      notice: inv.unspentPoints(s, bal) > 0 || inv.readyRewards(s, bal).length > 0 || (this.newTitles?.size ?? 0) > 0 || col.codexReady(s, bal),
       place: inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x)),
     });
     hud.setBag(s.bag.length, bal.inventory.bagSlots);
+    hud.setQuest(this.questBoard());
     hud.setBuffs(Object.entries(s.buffs ?? {}).map(([id, ms]) => ({ id, ms, icon: buffDef(id, bal)?.item, name: buffDef(id, bal)?.name ?? id })));
   }
 }
 
+const monName = (id) => bal.monsters.find((m) => m.id === id)?.name ?? id;
 function nameOf(id) {
   const all = [...bal.weapons, ...bal.armors, ...bal.consumables];
   return all.find((i) => i.id === id)?.name ?? id;

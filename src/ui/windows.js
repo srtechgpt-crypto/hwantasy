@@ -17,6 +17,7 @@ import { G, hud, josa } from '../state.js';
 import { savePrefs } from './prefs.js';
 import { assignSlot, setAutoUse, autoUse, PAGE_SIZE, HOTBAR_SLOTS } from '../domain/hotbar.js';
 import { learnedSkills } from '../domain/skills.js';
+import * as col from '../domain/collect.js';
 
 const $ = (id) => document.getElementById(id);
 const won = (n) => n.toLocaleString('ko-KR');
@@ -70,7 +71,8 @@ const TABS = {
   tele: [['tele', '목적지']],
   rates: [['rates', '배율 고르기']],
   // 8차 내 정보: 장비 9칸 · 능력치(보너스 점수) · 레벨 보상
-  me: [['gear', '장비'], ['stats', '능력치'], ['skill', '스킬'], ['reward', '보상']],
+  // 12차: 도감(장비 모으기)·칭호
+  me: [['gear', '장비'], ['stats', '능력치'], ['skill', '스킬'], ['reward', '보상'], ['codex', '도감'], ['title', '칭호']],
   // 6차 큰 지도: [전체] + 지역마다 한 탭(지역 이름은 짧게)
   map: [['all', '전체'], ...REGIONS.map((r) => [r.id, r.name.split(' ').pop()])],
 };
@@ -150,10 +152,10 @@ export function initWindows() {
       ? TABS[cur.kind].map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
       : '';
     $('winGold').textContent = won(s.player.gold);
-    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, gear: viewGear, stats: viewStats, skill: viewSkill, reward: viewReward, morph: viewMorph }[cur.tab];
+    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, gear: viewGear, stats: viewStats, skill: viewSkill, reward: viewReward, morph: viewMorph, codex: viewCodex, title: viewTitle }[cur.tab];
     // 탭 이름 옆 ! (남은 보너스 점수·받을 보상)
     if (cur.kind === 'me') {
-      for (const [id, on] of [['stats', inv.unspentPoints(s, bal) > 0], ['reward', inv.readyRewards(s, bal).length > 0]]) {
+      for (const [id, on] of [['stats', inv.unspentPoints(s, bal) > 0], ['reward', inv.readyRewards(s, bal).length > 0], ['codex', col.codexReady(s, bal)], ['title', (G.scene?.newTitles?.size ?? 0) > 0]]) {
         $('winTabs').querySelector(`[data-tab="${id}"]`)?.classList.toggle('notice', on);
       }
     }
@@ -695,6 +697,83 @@ export function initWindows() {
     return `<p class="sub-t">레벨을 달성하면 한 번씩 받을 수 있습니다. 가방에 자리가 있어야 합니다(지금 ${s.bag.length}/${bal.inventory.bagSlots}).</p>${rows}`;
   }
 
+  // ---------- 12차 도감 ----------
+  // 세트마다 칸 그림(넣음=밝게+✓, 가방에 넣을 수 있는 +0 장비가 있음=노란 테두리, 없음=흐리게), n/m, 효과, [넣기 N]
+  // [넣기]는 확인 상자(쓰일 장비 이름 목록)를 먼저 — 확인한 uid 그대로만 등록된다(⑤ #15·#17)
+  const CODEX_GROUPS = [['무기 모음', (id) => id.startsWith('wpn')], ['머리·몸 (투구·티셔츠·망토·장갑)', (id) => id.startsWith('top')],
+    ['허리·다리 (벨트·바지·부츠)', (id) => id.startsWith('low')], ['빛나는 장비', (id) => id.startsWith('rare')], ['특별', (id) => id === 'body' || id === 'lich']];
+  function viewCodex(s) {
+    const done = col.doneSets(s.codex, bal).length, total = bal.codex.length, p = col.permOf({ ...s, title: null }, bal);
+    const sum = col.fxText(p) || '아직 없음';
+    const head = `<div class="cxsum"><b>도감 ${done}/${total}</b><span>완성 효과 합계: ${sum}</span></div>
+      <p class="sub-t">같은 세트 장비를 모두 넣으면 효과가 영원히 붙습니다. 넣은 장비는 가방에서 사라집니다(<b>+0이고 끼지 않은 것만</b> 씁니다 — 강화한 장비·낀 장비·창고 물건은 쓰지 않음).</p>`;
+    const groups = CODEX_GROUPS.map(([gname, test]) => {
+      const rows = bal.codex.filter((c) => test(c.id)).map((c) => {
+        const have = s.codex[c.id] ?? [], plan = col.codexPlan(s, c.id, bal), canIds = new Set(plan.map((x) => x.id));
+        const complete = have.length === c.items.length;
+        const slots = c.items.map((id) => {
+          const st = have.includes(id) ? 'on' : canIds.has(id) ? 'can' : '';
+          return `<span class="cxslot ${st}" title="${esc(itemDef(id, bal).name)}">${icon(id)}${st === 'on' ? '<i>✓</i>' : ''}</span>`;
+        }).join('');
+        const btn = complete ? '<em class="ok-t">완성</em>'
+          : plan.length ? `<button type="button" class="act primary" data-act="cxask" data-set="${c.id}" ${cur.busy ? 'disabled' : ''}>넣기 ${plan.length}</button>` : '';
+        const ask = cur.cx?.set === c.id ? `<div class="cxconfirm">
+            <p><b>${esc(c.name)}</b>에 넣을 장비 — 가방에서 사라집니다</p>
+            <div class="cxlist">${cur.cx.ids.map((id) => `<span class="rwitem">${icon(id)}${esc(itemDef(id, bal).name)} +0</span>`).join('')}</div>
+            <div class="row"><button type="button" class="act primary" data-act="cxok" ${cur.busy ? 'disabled' : ''}>넣기</button><button type="button" class="act" data-act="cxno">취소</button></div></div>` : '';
+        return `<div class="cxrow ${complete ? 'done' : ''}"><div class="cxhead"><b>${esc(c.name)}</b><em>${have.length}/${c.items.length}</em><span class="cxfx">${col.fxText(c.fx)}</span>${btn}</div>
+          <div class="cxslots">${slots}</div>${ask}</div>`;
+      }).join('');
+      return `<h4 class="cxgroup">${gname}</h4>${rows}`;
+    }).join('');
+    return head + groups;
+  }
+  function doCodex() {
+    if (cur.busy || !cur.cx) return;
+    const fixed = cur.cx, before = col.earnedTitles(G.save, bal);
+    const res = inv.registerCodex(G.save, fixed.set, fixed.uids, bal);
+    if (!res.ok) { cur.cx = null; msg(res.reason || '넣을 수 없습니다', true); render(); return; }
+    cur.busy = true;
+    const set = col.codexSet(fixed.set, bal);
+    const ok = deal(res, 'codex', {
+      okText: res.complete ? `「${set.name}」 완성! ${col.fxText(set.fx)}` : `「${set.name}」에 ${res.added.length}개를 넣었습니다`,
+      after: () => {
+        if (cur) { cur.busy = false; cur.cx = null; }
+        hud.log(res.complete ? `<b style="color:#e0a63e">도감 「${esc(set.name)}」 완성</b> · ${col.fxText(set.fx)}` : `도감 「${esc(set.name)}」 ${res.added.map((id) => itemDef(id, bal).name).join(', ')} 넣음`);
+        G.scene?.checkNewTitles(before); // 수집가 칭호
+        G.scene?.refreshHud(true);
+      },
+    });
+    if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+  }
+
+  // ---------- 12차 칭호 ----------
+  // 맨 위: 쓰는 칭호 + [빼기]. 아래: 일반 몬스터마다 I·II·III 칩(얻음=[쓰기], 아직=진행 n/m), 보스·수집가
+  function viewTitle(s) {
+    const curT = s.title ? col.titleDef(s.title, bal) : null;
+    const head = `<div class="cxsum"><b>쓰는 칭호</b><span>${curT ? `《${esc(curT.name)}》 · ${col.fxText(curT.fx)}` : '없음'}</span>
+      ${curT ? `<button type="button" class="act" data-act="titleoff" ${cur.busy ? 'disabled' : ''}>빼기</button>` : ''}</div>
+      <p class="sub-t">칭호는 하나만 쓸 수 있고, 기사 머리 위에 보입니다. 몬스터를 잡은 수는 이번 업데이트 뒤부터 셉니다.</p>`;
+    const fresh = G.scene?.newTitles ?? new Set();
+    const chip = (t) => {
+      const got = col.titleEarned(t, s, bal), using = s.title === t.id, pr = col.titleProgress(t, s, bal);
+      const act = using ? '<em class="ok-t">쓰는 중</em>' : got ? `<button type="button" class="act primary" data-act="titleuse" data-id="${t.id}" ${cur.busy ? 'disabled' : ''}>쓰기</button>`
+        : `<em class="sub-t">${won(Math.min(pr.have, pr.need))}/${won(pr.need)}</em>`;
+      return `<div class="ttchip ${got ? 'got' : ''} ${using ? 'using' : ''} ${fresh.has(t.id) ? 'fresh' : ''}"><b>${esc(t.name.split(' ').pop())}</b><small>${col.fxText(t.fx)}</small>${act}</div>`;
+    };
+    const mons = col.normalMonsters(bal).map((m) => {
+      const ts = bal.titles.filter((t) => t.kind === 'kills' && t.mon === m.id);
+      return `<div class="ttrow"><div class="tthead"><b>${esc(m.name)} 사냥꾼</b><em>${won(s.kills[m.id] ?? 0)}마리</em></div><div class="ttchips">${ts.map(chip).join('')}</div></div>`;
+    }).join('');
+    const special = bal.titles.filter((t) => t.kind === 'codex' || bal.monsters.find((m) => m.id === t.mon)?.isBoss);
+    const sp = `<div class="ttrow"><div class="tthead"><b>보스·수집가</b><em>도감 ${col.doneSets(s.codex, bal).length}세트</em></div><div class="ttchips ttwide">${special.map((t) => chip(t).replace(`<b>${esc(t.name.split(' ').pop())}</b>`, `<b>${esc(t.name)}</b>`)).join('')}</div></div>`;
+    // 얻은 칭호는 맨 위에 한 줄로(아래 목록까지 내려가지 않아도 바로 쓰게)
+    const full = (t) => chip(t).replace(`<b>${esc(t.name.split(' ').pop())}</b>`, `<b>${esc(t.name)}</b>`);
+    const gotList = bal.titles.filter((t) => col.titleEarned(t, s, bal));
+    const got = gotList.length ? `<div class="ttrow"><div class="tthead"><b>얻은 칭호</b><em>${gotList.length}개</em></div><div class="ttchips ttwide">${gotList.map(full).join('')}</div></div>` : '';
+    return head + got + sp + mons;
+  }
+
   // ---------- 9차 스킬·단축 칸 ----------
   // 위: 단축 칸 12칸(1쪽·2쪽). 아래 고른 것을 [칸에 넣기] → 칸을 누르면 들어감. 칸만 누르면 [비우기]
   // 가운데: 액티브 스킬 카드(배운 것·못 배운 것, 자동 사용 켜기/끄기), 물건 줄, 패시브
@@ -883,7 +962,8 @@ export function initWindows() {
   $('winTabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act="tab"]');
     if (!b || !cur || cur.busy) return;
-    cur.tab = b.dataset.tab; cur.pick = null; cur.hbSel = null; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; cur.draft = null; cur.confirmReset = false; msg('');
+    if (cur.tab === 'title') G.scene?.newTitles?.clear(); // 12차: 칭호 탭을 보고 나가면 '새' 표시를 지움
+    cur.tab = b.dataset.tab; cur.cx = null; cur.pick = null; cur.hbSel = null; cur.sel = null; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; cur.draft = null; cur.confirmReset = false; msg('');
     render();
   });
   $('winClose').addEventListener('click', close);
@@ -947,6 +1027,25 @@ export function initWindows() {
         cur.busy = true;
         const here = { ...s, player: { ...s.player, ...G.scene.positionOf() } };
         const ok = deal(inv.resetBonus(here, bal), 'bonusReset', { keepPosition: true, okText: '보너스 점수를 되돌렸습니다. 다시 나눠 주세요', after: () => { if (cur) { cur.busy = false; cur.confirmReset = false; cur.draft = null; } G.scene?.refreshHud(true); } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      // 12차 도감·칭호
+      case 'cxask': {
+        const plan = col.codexPlan(s, d.set, bal);
+        if (!plan.length) { msg('넣을 수 있는 장비가 없습니다', true); break; }
+        cur.cx = { set: d.set, uids: plan.map((x) => x.uid), ids: plan.map((x) => x.id) }; msg(''); break;
+      }
+      case 'cxno': cur.cx = null; msg(''); break;
+      case 'cxok': doCodex(); return;
+      case 'titleuse': case 'titleoff': {
+        if (cur.busy) return;
+        const id = d.act === 'titleuse' ? d.id : null;
+        cur.busy = true;
+        const ok = deal(inv.setTitle(s, id, bal), 'title', {
+          okText: id ? `칭호 《${col.titleDef(id, bal).name}》을(를) 씁니다` : '칭호를 뺐습니다',
+          after: () => { if (cur) cur.busy = false; G.scene?.titleLook(); G.scene?.refreshHud(true); },
+        });
         if (!ok && !G.pending && cur) { cur.busy = false; render(); }
         return;
       }
@@ -1123,7 +1222,7 @@ export function initWindows() {
     if (res.gold !== fixed.gold) { cur.junk = null; msg('팔 목록이 바뀌었습니다. 다시 확인해 주세요', true); render(); return; }
     cur.busy = true;
     const ok = deal(res, 'sellJunk', {
-      okText: `안 쓰는 장비 ${won(res.count)}개를 팔았습니다 (+${won(res.gold)}원)`,
+      okText: `안 쓰는 장비 ${won(res.count)}개를 팔았습니다 (+${won(res.gold)}원)${col.codexReserved(G.save, bal).size ? ` · 도감에 넣을 장비 ${won(col.codexReserved(G.save, bal).size)}개는 남겼습니다([정보]→[도감])` : ''}`,
       after: () => { if (cur) { cur.busy = false; cur.junk = null; cur.sel = null; } hud.log(`안 쓰는 장비 ${won(res.count)}개 판매 · +${won(res.gold)}원`); },
     });
     if (!ok && !G.pending) { cur.busy = false; render(); }

@@ -5,6 +5,7 @@ import { TELEPORTS } from '../../data/maps.js';
 import { validate, statsOf, settleHp } from './save.js';
 import { applyBuffItem } from './buffs.js';
 import { morphInto } from './morph.js';
+import { codexSet, codexPlan, codexReserved, titleDef, titleEarned, killsMax, doneSets } from './collect.js';
 
 function transaction(save, bal, run) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
@@ -159,6 +160,8 @@ export function isJunkGear(save, item, bal) {
   const def = itemDef(item?.id, bal);
   if (!isGearDef(def) || !def.shop || item.enchant !== 0 || item.count !== 1) return false;
   if (Object.values(save.equip).includes(item.uid)) return false;
+  // 12차(⑤ #18): 비어 있는 도감 칸을 채울 장비(칸마다 하나)는 팔지 않는다
+  if (codexReserved(save, bal).has(item.uid)) return false;
   const worn = save.bag.find(other => other.uid === save.equip[slotOf(def)]);
   const wd = worn && itemDef(worn.id, bal);
   if (!wd || slotOf(wd) !== slotOf(def)) return false;
@@ -364,6 +367,36 @@ export function bossKill(save, bossId, reward, now, bal) {
       if (leftWh) ground.push({ id: drop.id, count: leftWh });
     }
     next.bosses[bossId] = now;
+    // 12차(⑤ #9): 보스 처치 수도 같은 거래 안에서(저장 실패면 함께 취소)
+    if (next.kills) next.kills[bossId] = Math.min(killsMax(bal), (next.kills[bossId] ?? 0) + 1);
     return { ok: true, save: next, levelsGained: prog.level - before, toBag, toWarehouse, ground };
+  });
+}
+// 12차 도감 등록(⑤ #15·#17): uids = 화면이 확인 상자에 보여 준 codexPlan의 uid 목록. 최신 save의 계획과 하나라도 다르면
+// 아무것도 쓰지 않고 실패(다시 보여 줌). 성공하면 그 장비가 가방에서 사라지고 save.codex[setId]에 아이템 id가 세트 순서대로 들어간다
+export function registerCodex(save, setId, uids, bal) {
+  const set = codexSet(setId, bal);
+  if (!set) return fail('알 수 없는 도감입니다');
+  if (!Array.isArray(uids) || !uids.length || uids.some(uid => !integer(uid, 1))) return fail('넣을 장비가 올바르지 않습니다');
+  return transaction(save, bal, next => {
+    const plan = codexPlan(next, setId, bal);
+    if (!plan.length) return fail('넣을 수 있는 장비가 없습니다(+0 · 끼지 않은 것만)');
+    if (plan.length !== uids.length || plan.some((p, i) => p.uid !== uids[i])) return fail('가방이 바뀌었습니다. 다시 확인해 주세요');
+    const before = doneSets(next.codex, bal).length;
+    for (const p of plan) if (take(next, p.uid, 1)) return fail('장비를 찾지 못했습니다');
+    const have = new Set([...(next.codex[setId] ?? []), ...plan.map(p => p.id)]);
+    next.codex[setId] = set.items.filter(id => have.has(id));
+    const complete = next.codex[setId].length === set.items.length;
+    return { ok: true, save: next, added: plan.map(p => p.id), complete, doneCount: doneSets(next.codex, bal).length, newlyDone: doneSets(next.codex, bal).length > before };
+  });
+}
+// 12차 칭호 쓰기/빼기(id = null이면 뺌). 체력은 넘친 만큼만 자른다(transaction의 settleHp, 회복 없음 — ⑤ #11)
+export function setTitle(save, id, bal) {
+  if (id !== null && !titleDef(id, bal)) return fail('알 수 없는 칭호입니다');
+  return transaction(save, bal, next => {
+    if (id !== null && !titleEarned(titleDef(id, bal), next, bal)) return fail('아직 얻지 못한 칭호입니다');
+    if (next.title === id) return fail(id === null ? '쓰는 칭호가 없습니다' : '이미 쓰는 칭호입니다');
+    next.title = id;
+    return { ok: true, save: next };
   });
 }

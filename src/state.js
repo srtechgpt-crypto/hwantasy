@@ -102,6 +102,18 @@ export const hud = {
     if (changed || was !== el.hidden) hud.relayout?.(); // 개수·글자 폭이 바뀌면 작은 지도 아래/옆 자리 다시 판정(main.js)
   },
   // 2026-10-17 가방 칸 배지(남은 칸 5 이하·가득)
+  // 12차 사냥 목표판: q = World.questBoard() 결과(없으면 숨김). 같은 글자면 다시 그리지 않음
+  setQuest(q) {
+    const el = $('quest');
+    if (!el) return;
+    el.hidden = !q;
+    if (!q) return;
+    const goal = `<b>목표</b><span class="qmon">${q.mon}</span><span class="qbar"><i style="width:${Math.round((100 * q.n) / q.need)}%"></i></span><span class="qn">${q.n}/${q.need}</span>${q.first ? '<em>첫 보상</em>' : ''}`;
+    const rec = `이번 사냥 처치 ${q.kills.toLocaleString('ko-KR')} · 경험치 +${q.exp.toFixed(2)}% · 돈 +${q.gold.toLocaleString('ko-KR')}${q.items ? ` · 물건 ${q.items}` : ''}`;
+    const g = $('questGoal'), r = $('questRec');
+    if (g.dataset.v !== goal) { g.dataset.v = goal; g.innerHTML = goal; }
+    if (r.textContent !== rec) r.textContent = rec;
+  },
   setBag(used, cap) {
     const el = $('bagBadge');
     if (!el) return;

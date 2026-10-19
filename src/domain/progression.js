@@ -67,7 +67,8 @@ export function activeSets(defs, bal) {
   });
 }
 // 11차: extra = { str, dex } 변신 무작위 능력치(원래 능력치에 그대로 더함 — 보너스 점수가 아니라 ×pointValue 안 함)
-export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null) {
+// 12차: perm = { hp, def, dmg, hit } 도감·칭호 영구 효과(collect.permOf). 체력은 패시브 % 전에 더한다(⑤ #10). 없으면 0
+export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, perm = null) {
   assertLevel(level, bal);
   if (!isRecord(equip)) throw new TypeError('장비 정보가 필요합니다');
   const gear = { def: 0, hp: 0, hit: 0, dmg: 0, regen: 0 };
@@ -93,14 +94,15 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null) {
   if (extra) { a.str += extra.str ?? 0; a.dex += extra.dex ?? 0; }
   const k = bal.knight, st = bal.stats, pm = passiveMods(level, bal);
   const str = a.str - st.base, dex = a.dex - st.base, con = a.con - st.base;
-  const hpBase = k.baseHp + k.hpPerLevel * (level - 1) + st.hpPerCon * con + gear.hp;
+  const pmHp = perm?.hp ?? 0, pmDef = perm?.def ?? 0, pmDmg = perm?.dmg ?? 0, pmHit = perm?.hit ?? 0;
+  const hpBase = k.baseHp + k.hpPerLevel * (level - 1) + st.hpPerCon * con + gear.hp + pmHp;
   const atkBase = Math.round(k.attackMs * (1 - st.atkMsPerDex * dex));
   return {
     ...a, points: bonusPoints(level, bal),
     maxHp: Math.floor((hpBase * (100 + pm.hpPct)) / 100),
-    dmgBonus: Math.max(Math.floor(level / k.atkDivisor), str) + gear.dmg,
-    def: Math.floor(level / k.defDivisor) + Math.floor(con / st.conPerDef) + gear.def + pm.def,
-    hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit + (wdef?.hit ?? 0),
+    dmgBonus: Math.max(Math.floor(level / k.atkDivisor), str) + gear.dmg + pmDmg,
+    def: Math.floor(level / k.defDivisor) + Math.floor(con / st.conPerDef) + gear.def + pm.def + pmDef,
+    hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit + (wdef?.hit ?? 0) + pmHit,
     // 간격 = 민첩 → 패시브 → 무기 계열 순으로 곱하고 한 번 반올림(검은 speed 100이라 9차와 같은 값). 최소 간격도 무기 계열 비율
     attackMs: Math.max(Math.round((st.minAttackMs * speed) / 100), Math.round((atkBase * (100 - pm.atkPct) * speed) / 10000)),
     // ⑤ #8: 최소 간격으로 자르기 전 값 — 날쌘 물약은 이 값에 곱한 뒤 마지막에 한 번만 자른다
