@@ -1,11 +1,14 @@
-import { clone, fail, integer, itemDef, EQUIP_SLOTS, isGearDef, slotOf } from './common.js';
+import { clone, fail, integer, itemDef, EQUIP_SLOTS, isGearDef, slotOf, isLocked } from './common.js';
 import { bossDef } from './boss.js';
-import { addExp, bonusPoints, validBonus } from './progression.js';
+import { addExp, bonusPoints, validBonus, needExp } from './progression.js';
 import { TELEPORTS } from '../../data/maps.js';
-import { validate, statsOf, settleHp } from './save.js';
+import { validate, statsOf, settleHp, loadoutNameOk } from './save.js';
 import { applyBuffItem } from './buffs.js';
 import { morphInto } from './morph.js';
 import { codexSet, codexPlan, codexReserved, titleDef, titleEarned, killsMax, doneSets } from './collect.js';
+import { skillDef, skillLevel, skillUpCost, cardIdOf } from './skills.js';
+import { random } from './common.js';
+import { elixirOf, dollDef, recoverCost } from './growth.js';
 
 function transaction(save, bal, run) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
@@ -39,7 +42,10 @@ function insert(next, key, id, count, bal, original = null) {
     if (!original && next.nextUid >= Number.MAX_SAFE_INTEGER) return left;
     const uid = original ? original.uid : next.nextUid++;
     const item = { uid, id, count: amount };
-    if (stackMax === 1) item.enchant = original?.enchant ?? 0;
+    if (stackMax === 1) {
+      item.enchant = original?.enchant ?? 0;
+      if (original?.lock === true) item.lock = true; // 13차: 맡기기·찾기에도 잠금 유지
+    }
     next[key].push(item); left -= amount;
     original = null;
   }
@@ -70,6 +76,9 @@ export function addItem(save, id, count, bal) {
 // Accept a stack uid, or an item id to consume across multiple bag stacks.
 export function removeItem(save, uid, count, bal) {
   if (!integer(count, 1) || !(integer(uid, 1) || typeof uid === 'string' && itemDef(uid, bal))) return fail('아이템 또는 수량이 올바르지 않습니다');
+  // 13차(⑤ #3): 잠긴 장비는 지우지 못한다. 장비는 uid로만(이름으로 지우면 어느 것이 빠질지 모름)
+  if (typeof uid === 'string' && isGearDef(itemDef(uid, bal))) return fail('장비는 uid로만 지울 수 있습니다');
+  if (isLocked(save?.bag?.find?.(it => it.uid === uid))) return fail('잠긴 장비는 지울 수 없습니다');
   return transaction(save, bal, next => take(next, uid, count) ? fail('아이템 수량이 부족합니다') : { ok: true, save: next });
 }
 export function equip(save, uid, bal) {
@@ -126,6 +135,7 @@ export function sellMany(save, lines, bal) {
       const item = next.bag.find(it => it.uid === uid);
       if (!item || item.count < count) return fail('고른 물건 수량이 바뀌었습니다. 다시 골라 주세요');
       if (Object.values(next.equip).includes(uid)) return fail('장착 중인 장비는 팔 수 없습니다');
+      if (isLocked(item)) return fail(LOCKED_SELL);
       gold += sellPrice(item.id, bal) * count;
     }
     if (!integer(next.player.gold + gold)) return fail('돈 한도를 초과했습니다');
@@ -145,6 +155,7 @@ export function sell(save, uid, count, bal) {
     const item = next.bag.find(item => item.uid === uid);
     if (!item || item.count < count) return fail('아이템 수량이 부족합니다');
     if (Object.values(next.equip).includes(uid)) return fail('장착 중인 장비는 팔 수 없습니다');
+    if (isLocked(item)) return fail(LOCKED_SELL);
     const gold = sellPrice(item.id, bal) * count;
     if (!integer(next.player.gold + gold)) return fail('돈 한도를 초과했습니다');
     take(next, uid, count); next.player.gold += gold;
@@ -158,7 +169,7 @@ export function sell(save, uid, count, bal) {
 const GEAR_FIELDS = { weapon: ['min', 'max', 'dmgPct', 'crit', 'hit'], armor: ['def', 'hp', 'hit', 'dmg', 'regen'] };
 export function isJunkGear(save, item, bal) {
   const def = itemDef(item?.id, bal);
-  if (!isGearDef(def) || !def.shop || item.enchant !== 0 || item.count !== 1) return false;
+  if (!isGearDef(def) || !def.shop || item.enchant !== 0 || item.count !== 1 || isLocked(item)) return false;
   if (Object.values(save.equip).includes(item.uid)) return false;
   // 12차(⑤ #18): 비어 있는 도감 칸을 채울 장비(칸마다 하나)는 팔지 않는다
   if (codexReserved(save, bal).has(item.uid)) return false;
@@ -168,7 +179,7 @@ export function isJunkGear(save, item, bal) {
   // 10차: 무기는 같은 계열끼리만 비교, 공격 간격(speedPct)은 같거나 느릴 때만(+가 느림)
   if (def.kind === 'weapon' && ((def.type ?? 'sword') !== (wd.type ?? 'sword') || (def.speedPct ?? 0) < (wd.speedPct ?? 0))) return false;
   // 10차(⑤ #15): 부위 장비는 같은 등급 부위를 다른 칸에 하나라도 끼고 있으면 세트 후보라 팔지 않는다
-  const partTier = d => (d?.kind === 'armor' && d.slot && d.slot !== 'armor' ? d.tier : null);
+  const partTier = d => (d?.kind === 'armor' && d.slot && d.slot !== 'armor' && !d.acc ? d.tier : null); // 18차: 장신구는 세트 후보 아님
   if (partTier(def) && EQUIP_SLOTS.some(sl => sl !== slotOf(def) && partTier(itemDef(save.bag.find(o => o.uid === save.equip[sl])?.id, bal)) === def.tier)) return false;
   return GEAR_FIELDS[def.kind].every(f => (def[f] ?? 0) <= (wd[f] ?? 0));
 }
@@ -398,5 +409,275 @@ export function setTitle(save, id, bal) {
     if (next.title === id) return fail(id === null ? '쓰는 칭호가 없습니다' : '이미 쓰는 칭호입니다');
     next.title = id;
     return { ok: true, save: next };
+  });
+}
+
+// ---------- 13차 「편하게」 ----------
+const LOCKED_SELL = '잠긴 장비는 팔 수 없습니다. 가방에서 잠금을 풀어 주세요';
+// 장비 잠금: 가방·창고 어디 있든 켜고 끈다(끄면 필드를 지움). 팔기·도감·강화는 각 함수가 막는다
+export function setLock(save, uid, on, bal) {
+  if (!integer(uid, 1) || typeof on !== 'boolean') return fail('아이템이 올바르지 않습니다');
+  return transaction(save, bal, next => {
+    const item = [...next.bag, ...next.warehouse].find(it => it.uid === uid);
+    if (!item || !isGearDef(itemDef(item.id, bal))) return fail('잠글 수 있는 것은 장비뿐입니다');
+    if (isLocked(item) === on) return fail(on ? '이미 잠겨 있습니다' : '잠겨 있지 않습니다');
+    if (on) item.lock = true; else delete item.lock;
+    return { ok: true, save: next };
+  });
+}
+// 자동 보충 목표: 0이면 키를 지우고, 비면 필드째 지운다(검사 규칙과 같은 모양)
+export function setRestock(save, id, target, bal) {
+  if (!(bal.restockItems ?? []).includes(id) || !(bal.restockSteps ?? []).includes(target)) return fail('고를 수 없는 목표입니다');
+  return transaction(save, bal, next => {
+    const map = { ...(next.restock ?? {}) };
+    if (target) map[id] = target; else delete map[id];
+    if (Object.keys(map).length) next.restock = map; else delete next.restock;
+    return { ok: true, save: next };
+  });
+}
+// 지금 사면 무엇을 얼마나: 목록 순서대로, 앞 줄을 산 뒤의 돈·가방 자리로 계산(창고는 세지 않음). 원본은 바꾸지 않는다
+export function restockPlan(save, bal) {
+  const lines = [];
+  let gold = save.player.gold, cost = 0, short = false;
+  const bag = save.bag.map(it => ({ id: it.id, count: it.count }));
+  let empty = Math.max(0, bal.inventory.bagSlots - bag.length);
+  for (const id of bal.restockItems ?? []) {
+    const target = save.restock?.[id] ?? 0;
+    if (!target) continue;
+    const def = itemDef(id, bal);
+    if (!def?.shop || !integer(def.price, 1)) continue;
+    const have = bag.filter(it => it.id === id).reduce((sum, it) => sum + it.count, 0);
+    const need = Math.max(0, target - have);
+    if (!need) continue;
+    const stackMax = bal.inventory.stackMax;
+    const room = bag.filter(it => it.id === id).reduce((sum, it) => sum + stackMax - it.count, 0) + empty * stackMax;
+    const count = Math.min(need, Math.floor(gold / def.price), room);
+    const why = count < need ? (Math.floor(gold / def.price) < Math.min(need, room) ? 'gold' : 'bag') : null;
+    if (why) short = true;
+    lines.push({ id, need, count, short: why });
+    if (!count) continue;
+    gold -= def.price * count; cost += def.price * count;
+    // 묶음을 채우고 남으면 새 칸(insert와 같은 규칙)
+    let left = count;
+    for (const it of bag) { if (it.id !== id) continue; const m = Math.min(left, stackMax - it.count); it.count += m; left -= m; }
+    while (left > 0) { const m = Math.min(left, stackMax); bag.push({ id, count: m }); empty -= 1; left -= m; }
+  }
+  const bought = lines.filter(l => l.count > 0);
+  const reason = bought.length ? null : !lines.length ? 'nothing' : lines.some(l => l.short === 'gold') ? 'gold' : 'bag';
+  return { lines, bought, cost, short, reason };
+}
+// 자동 보충 한 거래: 살 게 하나도 없으면 실패(reason 'nothing'|'gold'|'bag'). 일부만 샀으면 short
+export function restock(save, bal) {
+  return transaction(save, bal, next => {
+    const plan = restockPlan(next, bal);
+    if (!plan.bought.length) return { ...fail(plan.reason === 'nothing' ? '채울 것이 없습니다' : plan.reason === 'gold' ? '돈이 모자라 살 수 없습니다' : '가방에 자리가 없습니다'), why: plan.reason };
+    for (const l of plan.bought) if (insert(next, 'bag', l.id, l.count, bal)) return fail('가방에 자리가 없습니다');
+    if (next.player.gold < plan.cost) return fail('돈이 부족합니다');
+    next.player.gold -= plan.cost;
+    return { ok: true, save: next, lines: plan.bought, cost: plan.cost, short: plan.short };
+  });
+}
+// 가방·창고 정리: 무기 → 방어구(칸 순서, 좋은 등급·높은 강화 먼저) → 회복 물약 → 버프 → 주문서·기타(정의 순서) → uid. 순서만 바뀐다
+const kindRank = def => (def.kind === 'weapon' ? 0 : def.kind === 'armor' ? 1 : def.heal ? 2 : def.buff ? 3 : 4);
+export function sortItems(save, where, bal) {
+  if (where !== 'bag' && where !== 'warehouse') return fail('정리할 곳이 올바르지 않습니다');
+  const order = new Map(bal.consumables.map((d, i) => [d.id, i]));
+  const key = it => {
+    const d = itemDef(it.id, bal);
+    const gear = isGearDef(d);
+    return [kindRank(d), gear ? EQUIP_SLOTS.indexOf(slotOf(d)) : 0, gear ? -(d.tier ?? 0) : 0, gear ? -d.price : order.get(d.id) ?? 0, gear ? -(it.enchant ?? 0) : 0, it.uid];
+  };
+  const cmp = (a, b) => { const ka = key(a), kb = key(b); for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i]; return 0; };
+  return transaction(save, bal, next => {
+    const sorted = [...next[where]].sort(cmp);
+    if (sorted.every((it, i) => it === next[where][i])) return fail('이미 정리되어 있습니다');
+    next[where] = sorted;
+    return { ok: true, save: next };
+  });
+}
+
+// ---------- 14차 스킬 성장 ----------
+// 스킬 레벨 올리기: 배운 스킬, 최대 아님, 그 스킬 카드 cards장 + 돈 gold. 한 거래(카드·돈·레벨 함께)
+export function levelUpSkill(save, id, bal) {
+  let def;
+  try { def = skillDef(id, bal); } catch { return fail('알 수 없는 스킬입니다'); }
+  return transaction(save, bal, next => {
+    if (next.player.level < def.level) return fail(`${def.name}은(는) Lv ${def.level}에 배웁니다`);
+    const lv = skillLevel(next, id), cost = skillUpCost(lv, bal);
+    if (!cost) return fail('이미 최고 레벨입니다');
+    const card = cardIdOf(id);
+    if (countItem(next, card) < cost.cards) return fail(`${itemDef(card, bal).name}가 ${cost.cards}장 필요합니다`);
+    if (next.player.gold < cost.gold) return fail(`돈이 ${cost.gold.toLocaleString('ko-KR')}원 필요합니다`);
+    if (take(next, card, cost.cards)) return fail('카드를 찾지 못했습니다');
+    next.player.gold -= cost.gold;
+    next.skillLv = { ...(next.skillLv ?? {}), [id]: lv + 1 };
+    return { ok: true, save: next, from: lv, to: lv + 1, cost };
+  });
+}
+// 카드 합성: 같은 카드 cardFuse장 → 다음 등급 카드 1장(그 등급 안에서 균등, 난수 1개). 영웅은 합성 불가
+export function fuseCards(save, skillId, rng, bal) {
+  const grade = bal.skillGrades?.[skillId], order = bal.gradeOrder ?? [];
+  if (!grade) return fail('알 수 없는 카드입니다');
+  const gi = order.indexOf(grade);
+  if (gi < 0 || gi >= order.length - 1) return fail('가장 높은 등급 카드는 합성할 수 없습니다');
+  const pool = Object.keys(bal.skillGrades).filter(s => bal.skillGrades[s] === order[gi + 1]);
+  return transaction(save, bal, next => {
+    const card = cardIdOf(skillId), n = bal.cardFuse;
+    if (countItem(next, card) < n) return fail(`같은 카드가 ${n}장 있어야 합니다`);
+    if (take(next, card, n)) return fail('카드를 찾지 못했습니다');
+    // ⑤ #1: 어떤 카드가 나와도 들어갈 자리가 있어야 한다(가방을 채워 결과를 고르는 것을 막음)
+    const fits = id => (next.bag.length < bal.inventory.bagSlots && next.nextUid < Number.MAX_SAFE_INTEGER) || next.bag.some(it => it.id === cardIdOf(id) && it.count < bal.inventory.stackMax); // ⑦ #1: 새 uid도
+    if (!pool.every(fits)) return fail('가방에 빈 칸이 1칸 있어야 합니다');
+    // ⑤ #2: 모든 검사를 통과한 뒤에만 난수 1개
+    let pick;
+    try { pick = pool[Math.floor(random(rng) * pool.length)]; } catch { return fail('난수 함수가 올바르지 않습니다'); }
+    if (insert(next, 'bag', cardIdOf(pick), 1, bal)) return fail('가방에 자리가 없습니다');
+    return { ok: true, save: next, got: pick, gotId: cardIdOf(pick) };
+  });
+}
+
+// ---------- 15차 캐릭터 성장 ----------
+// 엘릭서 마시기: 그 능력치 +1(최대 elixirMax). 다 찼으면 아이템을 쓰지 않는다
+export function drinkElixir(save, itemId, bal) {
+  const def = itemDef(itemId, bal);
+  if (!def?.elixir) return fail('엘릭서가 아닙니다');
+  return transaction(save, bal, next => {
+    const e = { str: 0, dex: 0, con: 0, ...(elixirOf(next) ?? {}) };
+    if (e[def.elixir] >= bal.elixirMax) return fail(`이미 ${bal.elixirMax}개를 마셨습니다`);
+    if (take(next, itemId, 1)) return fail(`${def.name}이(가) 없습니다`);
+    e[def.elixir] += 1;
+    next.player.elixir = e;
+    return { ok: true, save: next, stat: def.elixir, count: e[def.elixir] };
+  });
+}
+// ⑤ #1·⑦ #1: 실제로 되찾을 양(최대 레벨에 닿으면 거기까지)과 돈 — 거래와 화면이 같은 함수
+export function recoverQuote(save, bal) {
+  const lost = save.recover?.exp ?? 0, max = bal.progression.maxLevel;
+  if (!lost) return { lost: 0, used: 0, cost: 0, max: false };
+  if (save.player.level >= max) return { lost, used: 0, cost: 0, max: true };
+  let room = needExp(save.player.level, bal) - save.player.exp;
+  for (let lv = save.player.level + 1; lv < max && room < lost; lv++) room += needExp(lv, bal);
+  const used = Math.min(lost, room);
+  return { lost, used, cost: recoverCost(used, bal), max: false };
+}
+// 경험치 복구: 마을에서, 잃은 경험치 전부를 돈으로(레벨이 오를 수 있음). 되찾으면 기록을 지운다
+export function recoverExp(save, bal) {
+  return transaction(save, bal, next => {
+    const q = recoverQuote(next, bal);
+    if (!q.lost) return fail('되찾을 경험치가 없습니다');
+    if (q.max) return fail('최대 레벨이라 되찾을 경험치가 없습니다');
+    const { used, cost } = q;
+    if (next.player.gold < cost) return fail(`돈이 ${cost.toLocaleString('ko-KR')}원 필요합니다`);
+    const before = next.player.level;
+    const prog = addExp({ level: next.player.level, exp: next.player.exp }, used, bal);
+    next.player.level = prog.level; next.player.exp = prog.exp;
+    next.player.gold -= cost;
+    delete next.recover;
+    return { ok: true, save: next, exp: used, cost, levelsGained: prog.level - before };
+  });
+}
+// 마법인형 상자 열기: 4종 중 하나(난수 1개, 모든 검사 뒤). 이미 가진 인형이면 dollRefund원을 돌려받는다
+export function openDollBox(save, rng, bal) {
+  const list = bal.dolls ?? [];
+  if (!list.length) return fail('마법인형이 없습니다');
+  return transaction(save, bal, next => {
+    if (countItem(next, 'dollBox') < 1) return fail('마법인형 상자가 없습니다');
+    if (!integer(next.player.gold + bal.dollRefund)) return fail('돈 한도를 초과했습니다'); // ⑤ #2: 난수 전에
+    if (take(next, 'dollBox', 1)) return fail('마법인형 상자가 없습니다');
+    let pick;
+    try { pick = list[Math.floor(random(rng) * list.length)].id; } catch { return fail('난수 함수가 올바르지 않습니다'); }
+    const owned = next.dolls?.owned ?? [];
+    if (owned.includes(pick)) {
+      next.player.gold += bal.dollRefund;
+      return { ok: true, save: next, doll: pick, dup: true };
+    }
+    next.dolls = { owned: [...owned, pick], cur: next.dolls ? next.dolls.cur : pick }; // 처음 얻은 인형만 바로 데리고 다님(⑦ #2: 두고 다니기는 그대로)
+    return { ok: true, save: next, doll: pick, dup: false };
+  });
+}
+// 데리고 다닐 인형 바꾸기(null = 두고 다님)
+export function setDoll(save, id, bal) {
+  if (id !== null && !dollDef(id, bal)) return fail('알 수 없는 인형입니다');
+  return transaction(save, bal, next => {
+    if (!next.dolls) return fail('가진 인형이 없습니다');
+    if (id !== null && !next.dolls.owned.includes(id)) return fail('가지지 않은 인형입니다');
+    if (next.dolls.cur === id) return fail('이미 그렇게 되어 있습니다');
+    next.dolls = { ...next.dolls, cur: id };
+    return { ok: true, save: next };
+  });
+}
+
+// ---------- 16차 지도에서 바로 순간이동 ----------
+// 마을에서는 마법사와 같은 값, 마을 밖에서는 2배(최소 mapTeleportMin원). 보스 방·시전 중은 화면이 먼저 막는다(사냥터 주문서와 같은 검사)
+export function mapTeleportCost(save, destId, bal) {
+  const dest = bal.teleport?.find(item => item.id === destId);
+  if (!dest || !integer(dest.price)) return null;
+  return save.player.map === bal.town.id ? dest.price : Math.max(bal.mapTeleportMin ?? 40, dest.price * 2);
+}
+export function mapTeleport(save, destId, bal) {
+  const point = TELEPORTS.find(item => item.id === destId);
+  const cost = mapTeleportCost(save, destId, bal);
+  if (!point || cost === null) return fail('갈 수 없는 곳입니다');
+  return transaction(save, bal, next => {
+    if (next.player.hp <= 0) return fail('쓰러진 상태에서는 이동할 수 없습니다');
+    if (next.player.gold < cost) return fail(`돈이 부족합니다(${cost.toLocaleString('ko-KR')}원)`);
+    next.player.gold -= cost;
+    Object.assign(next.player, { map: destId, x: point.x, y: point.y });
+    return { ok: true, save: next, cost };
+  });
+}
+
+// ---------- 19차 보스 코인 교환 ----------
+// 교환표(bal.coinShop)의 물건을 코인으로. 한 거래(코인 빼기·넣기), 가방이 모자라면 아무것도 안 바뀜
+export function coinBuy(save, id, count, bal) {
+  const line = (bal.coinShop ?? []).find(l => l.id === id);
+  if (!line || !itemDef(id, bal) || !integer(count, 1, 999)) return fail('바꿀 수 없는 물건입니다');
+  const need = line.coins * count;
+  return transaction(save, bal, next => {
+    if (countItem(next, 'bossCoin') < need) return fail(`보스 코인이 ${need}개 필요합니다`);
+    if (take(next, 'bossCoin', need)) return fail('보스 코인이 모자랍니다');
+    if (insert(next, 'bag', id, count, bal)) return fail('가방에 자리가 없습니다');
+    return { ok: true, save: next, coins: need };
+  });
+}
+
+// ---------- 20차 장비 세트(사냥용·보스용 등 3칸) ----------
+// 지금 낀 장비를 칸 i에 저장(이름 1~8자)
+export function saveLoadout(save, i, name, bal) {
+  if (!integer(i, 0, 2) || typeof name !== 'string' || !loadoutNameOk(name.trim())) return fail('세트 이름은 1~8글자입니다');
+  return transaction(save, bal, next => {
+    const list = next.loadouts ? [...next.loadouts] : [null, null, null];
+    list[i] = { name: name.trim(), equip: Object.fromEntries(EQUIP_SLOTS.map(sl => [sl, next.equip[sl] ?? null])) };
+    next.loadouts = list;
+    return { ok: true, save: next };
+  });
+}
+export function clearLoadout(save, i, bal) {
+  if (!integer(i, 0, 2)) return fail('세트 칸이 올바르지 않습니다');
+  return transaction(save, bal, next => {
+    if (!next.loadouts?.[i]) return fail('빈 세트입니다');
+    const list = [...next.loadouts]; list[i] = null;
+    if (list.every(l => l === null)) delete next.loadouts; else next.loadouts = list;
+    return { ok: true, save: next };
+  });
+}
+// 세트로 바꿔 끼기: 세트에 적힌 장비 중 **가방에 아직 있고 그 칸에 맞는 것**만 끼고, 없어진 것(팔림·사라짐·창고)은 그 칸을 비우지 않고 지금 것 그대로.
+// 반환 missing = 못 낀 칸 수(알림용). 한 거래(체력은 transaction이 정리)
+export function applyLoadout(save, i, bal) {
+  if (!integer(i, 0, 2)) return fail('세트 칸이 올바르지 않습니다');
+  return transaction(save, bal, next => {
+    const l = next.loadouts?.[i];
+    if (!l) return fail('빈 세트입니다');
+    let missing = 0, changed = 0;
+    for (const sl of EQUIP_SLOTS) {
+      const uid = l.equip[sl];
+      if (uid === null) { if (next.equip[sl] !== null) { next.equip[sl] = null; changed++; } continue; }
+      const it = next.bag.find(x => x.uid === uid);
+      if (!it || slotOf(itemDef(it.id, bal)) !== sl) { missing++; continue; }
+      if (next.equip[sl] !== uid) { next.equip[sl] = uid; changed++; }
+    }
+    // ⑤ #4: 바뀐 것이 없으면 저장하지 않고 이유(이미 같음 / 없어진 장비 N칸)를 알림
+    if (!changed) return { ...fail(missing ? `바꿀 것이 없습니다 — 세트의 장비 ${missing}칸이 가방에 없어 지금 것 그대로입니다` : '이미 이 세트를 끼고 있습니다'), missing };
+    return { ok: true, save: next, missing, changed };
   });
 }

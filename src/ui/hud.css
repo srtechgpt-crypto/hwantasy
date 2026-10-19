@@ -448,3 +448,100 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .ttchip.got { opacity: 1; border-color: rgba(240,200,96,.5); }
 .ttchip.using { border-color: #9fe08a; background: rgba(159,224,138,.12); }
 .ttchip.fresh { box-shadow: 0 0 0 2px rgba(240,200,96,.6); }
+
+/* ---------- 13차 「편하게」 ---------- */
+/* 반쪽 가방: 오른쪽에 붙고 게임은 계속(바깥 빈 곳은 눌러도 게임으로 감) */
+#win.half { background: transparent; pointer-events: none; place-items: start end; padding: 50px 6px 6px; }
+#win.half .wpanel { pointer-events: auto; width: min(560px, 60vw); height: calc(100dvh - 58px); background: linear-gradient(180deg, rgba(35,37,51,.96) 0%, rgba(26,28,38,.96) 100%); }
+#win.half .whead h2 { font-size: 16px; }
+#win.half .split { grid-template-columns: 1fr; gap: 8px; }
+#win.half .gbag { grid-template-columns: repeat(auto-fill, 40px); max-height: 40dvh; overflow-y: auto; padding-right: 2px; }
+#win.half .cell { width: 40px; height: 40px; }
+#win.half .split > .side { position: static; }
+#win.half .stats { font-size: 12px; gap: 4px 10px; }
+#win.half .ench-split { grid-template-columns: 1fr; }
+#win.half .ench-split .list { max-height: 30dvh; overflow-y: auto; }
+.bagchips { align-items: center; }
+.bagchips .sortbtn { margin-left: auto; }
+.sortbtn { border-color: var(--gold); color: var(--gold); }
+.bank h4 .sortbtn { font-size: 12px; min-height: 26px; padding: 2px 10px; margin-left: 6px; vertical-align: middle; }
+.cell .lockm { position: absolute; right: 0; bottom: 12px; font-size: 10px; line-height: 1; filter: drop-shadow(0 1px 1px #000); }
+.lockbtn { white-space: nowrap; }
+.lockhint { color: #ffd36a; }
+/* 자동 보충 */
+.rsgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 10px; margin: 6px 0; }
+.rsrow { display: grid; grid-template-columns: 32px 1fr 40px 64px 40px; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; background: rgba(0,0,0,.25); border: 1px solid transparent; }
+.rsrow.on { border-color: rgba(224,166,62,.5); background: rgba(224,166,62,.10); }
+.rsname { font-size: 13px; line-height: 1.2; min-width: 0; }
+.rsname small { display: block; color: var(--muted); font-size: 11px; }
+.rsval { text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+.rsrow:not(.on) .rsval { color: var(--muted); font-weight: 400; }
+.rsnow { border-top: 1px solid var(--line); padding-top: 6px; }
+.rsnow h4 { margin: 2px 0 4px; font-size: 14px; color: var(--gold); }
+.rsbuy { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+@media (max-width: 700px) { .rsgrid { grid-template-columns: 1fr; } }
+
+/* ---------- 14차 스킬 성장 ---------- */
+.grade { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 3px; line-height: 16px; vertical-align: 1px; }
+.grade.g-common { background: #5a5c68; color: #eceef4; }
+.grade.g-uncommon { background: #2e7a3c; color: #e4ffe6; }
+.grade.g-rare { background: #2c5aa8; color: #e6f0ff; }
+.grade.g-hero { background: #a8761c; color: #fff4d6; }
+b.grade { background: none; padding: 0; }
+b.grade.g-common { color: #c8cad4; } b.grade.g-uncommon { color: #7fdc8a; } b.grade.g-rare { color: #8cc0ff; } b.grade.g-hero { color: #ffd060; }
+.skstars { color: #ffd060; font-size: 12px; letter-spacing: -1px; margin: 0 2px; }
+.sknext { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
+.skcard.g-rare { box-shadow: inset 3px 0 0 #4c8de8; }
+.skcard.g-uncommon { box-shadow: inset 3px 0 0 #4cb860; }
+.skcard.g-hero { box-shadow: inset 3px 0 0 #e0a63e; }
+.skcard.g-common { box-shadow: inset 3px 0 0 #8a8c98; }
+.skup { font-size: 12px; white-space: nowrap; }
+.skchips .chip.g-common { border-color: #8a8c98; } .skchips .chip.g-uncommon { border-color: #4cb860; } .skchips .chip.g-rare { border-color: #4c8de8; } .skchips .chip.g-hero { border-color: #e0a63e; }
+.fusebox { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 10px; }
+.fuserow { display: flex; align-items: center; gap: 8px; padding: 3px 6px; background: rgba(0,0,0,.25); border-radius: 6px; font-size: 13px; }
+.fuserow span { flex: 1; min-width: 0; }
+.fuserow .act { font-size: 12px; white-space: nowrap; }
+
+/* ---------- 15차 캐릭터 성장 ---------- */
+.elixrow { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.elixrow b { color: var(--parch); }
+.recover { text-align: center; padding-top: 10px; }
+.recover p { margin: 6px 0; }
+.dollgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 10px; margin: 6px 0; }
+.dollrow { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid transparent; font-size: 13px; }
+.dollrow span:nth-child(2) { flex: 1; min-width: 0; }
+.dollrow.on { border-color: var(--gold); background: rgba(224,166,62,.12); }
+.dollrow.locked { opacity: .5; }
+.dolldot { width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px currentColor, inset -2px -2px 0 rgba(0,0,0,.25); flex: none; }
+.recover .btns { justify-content: center; }
+.mapbar.maptop { margin: 0 0 6px; }
+
+/* ---------- 17차 편의 2 ---------- */
+.elog { margin-top: 8px; font-size: 12px; border-top: 1px solid var(--line); padding-top: 4px; }
+.elog summary { cursor: pointer; color: var(--gold); font-size: 13px; }
+.elog ul { list-style: none; margin: 4px 0 0; padding: 0; max-height: 140px; overflow-y: auto; }
+.elog li { padding: 2px 0; border-bottom: 1px dashed rgba(239,228,200,.08); }
+.elog li .when { display: inline-block; min-width: 54px; color: var(--muted); }
+.elog li em { font-style: normal; color: var(--muted); font-size: 11px; }
+.favbtn.on { border-color: var(--gold); color: var(--gold); }
+
+/* ---------- 19차 보스 코인 ---------- */
+.coinhead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.coinhead .sub-t { margin-left: auto; }
+.coinrow em { display: inline-flex; align-items: center; gap: 2px; font-style: normal; color: var(--gold); white-space: nowrap; }
+.coinrow small { color: var(--muted); }
+.ic.mini { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; }
+.coinlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 4px 8px; }
+.coinrow { display: grid !important; grid-template-columns: 32px 1fr auto auto; align-items: center; gap: 8px; }
+.coinrow .act { padding: 6px 12px; }
+@media (max-width: 760px) { .coinlist { grid-template-columns: 1fr; } }
+
+/* ---------- 20차 장비 세트 ---------- */
+.loadouts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 8px; font-size: 13px; }
+.loadout { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 8px; background: rgba(0,0,0,.25); border: 1px solid var(--line); }
+.loadout .act { padding: 4px 10px; font-size: 13px; }
+.loadout.empty { opacity: .8; }
+.loadout .act { min-height: 30px; min-width: 0; padding: 2px 10px; font-size: 13px; }
+.loadout .act.x { padding: 2px 8px; }
+.loadouts { margin-bottom: 6px; }
+.loadout.editing input { width: 9em; padding: 4px 6px; font-size: 14px; border-radius: 6px; border: 1px solid var(--gold); background: rgba(0,0,0,.4); color: var(--parch); }

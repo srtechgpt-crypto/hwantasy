@@ -10,12 +10,14 @@ import * as inv from '../domain/inventory.js';
 import { bossRemainMs, bossReady, normalizeBossTime } from '../domain/boss.js';
 import { decideAuto } from '../domain/autohunt.js';
 import { findPath } from '../domain/path.js';
-import { learnedSkills, skillDef, incomingReduce, counterDamage } from '../domain/skills.js';
+import { learnedSkills, skillDef, incomingReduce, counterDamage, skillAt, skillLevel } from '../domain/skills.js';
 import { placeLearned, autoUse, PAGE_SIZE } from '../domain/hotbar.js';
 import { createSkillFx } from '../ui/skillfx.js';
 import { compareGear, loadoutStats } from '../domain/compare.js';
 import { morphDef, tickMorph, rollText } from '../domain/morph.js';
 import { statsOf } from '../domain/save.js';
+import { itemDef } from '../domain/common.js';
+import { phaseAt } from '../domain/daynight.js';
 import { applyBuffs, scrollExpPct, tickBuffs, buffDef, buffOfItem } from '../domain/buffs.js';
 import * as col from '../domain/collect.js';
 import { createJoystick } from '../ui/joystick.js';
@@ -240,6 +242,22 @@ export class WorldScene extends Phaser.Scene {
     c.fillStyle = g; c.fillRect(0, 0, w, h);
     tex.refresh();
     this.dark = this.add.image(this.snap(this.knight?.x ?? 0), this.snap((this.knight?.y ?? 8) - 8), 'dark').setDepth(975).setAlpha(alpha);
+    // 16차 밤: 화면을 덮는 푸른 사각형(어둠 그림 바로 아래)
+    if (this.nightRect) this.nightRect.destroy();
+    this.nightRect = this.add.rectangle(this.snap(this.knight?.x ?? 0), this.snap(this.knight?.y ?? 0), w, h, 0x0a1440).setDepth(974).setAlpha(0);
+  }
+  // 16차 낮·밤: 실제 시각으로 하루 20분. 마을은 덜 어둡게, '흔들림·번쩍임 줄이기'면 절반
+  updateNight() {
+    if (!this.nightRect) return;
+    this.nightRect.setPosition(this.snap(this.knight.x), this.snap(this.knight.y));
+    // ⑤ #8: 시각·어둡기는 0.25초마다(지역·흔들림 설정이 바뀌면 바로)
+    const now = performance.now(), key = `${this.region}|${!!this.prefs?.calm}`;
+    if (now - (this.nightAt ?? 0) < 250 && key === this.nightKey) return;
+    this.nightAt = now; this.nightKey = key;
+    const p = phaseAt(Date.now());
+    const a = p.dark * (this.region === 'town' ? 0.22 : 0.38) * (this.prefs?.calm ? 0.5 : 1);
+    if (Math.abs(a - this.nightRect.alpha) > 0.001) this.nightRect.setAlpha(a);
+    this.isNight = p.night;
   }
 
   makeNpcs() {
@@ -298,6 +316,7 @@ export class WorldScene extends Phaser.Scene {
   refreshZoomButtons() {
     for (const [id, v] of [['zoomFar', -1], ['zoomMid', 0], ['zoomNear', 1]]) document.getElementById(id)?.classList.toggle('on', this.prefs.zoom === v);
     for (const [id, v] of [['calmOff', false], ['calmOn', true]]) document.getElementById(id)?.classList.toggle('on', !!this.prefs.calm === v);
+    for (const [id, v] of [['cycleOff', false], ['cycleOn', true]]) document.getElementById(id)?.classList.toggle('on', !!this.prefs.cycle === v);
   }
 
   // 화면 끊김 방지: Phaser의 roundPixels는 카메라 위치를 그림 1칸(=화면 3픽셀) 단위로 내려서
@@ -358,6 +377,8 @@ export class WorldScene extends Phaser.Scene {
     this.rec = { kills: 0, exp: 0, gold: 0, items: 0 };
     this.newTitles = new Set();
     this.titleLook();
+    this.region = mapIdAt(this.knight.x);
+    this.restockDue = this.region === 'town'; // 13차: 마을에서 이어하면 한 번
     this.playing = true;
     hud.log(isNew ? '바람 마을에 도착했습니다. 마을 사람들에게 다가가 [대화]를 눌러 보세요.' : `다시 오셨습니다. Lv ${p.level} 기사`);
     this.refreshHud(true);
@@ -377,7 +398,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   // 순간이동 저장이 성공한 뒤 불린다(G.save.player에 목적지가 이미 들어 있음)
-  applyTeleport(name, byScroll = false) {
+  applyTeleport(name, byScroll = false, { fromCycle = false } = {}) {
+    if (!fromCycle) this.cancelCycle(); // 16차 ⑤ #3: 직접 순간이동이면 자동 순환 취소
     this.setAuto(false);
     this.releaseInput();
     this.cancelSlam();
@@ -387,7 +409,7 @@ export class WorldScene extends Phaser.Scene {
     this.knight.x = G.save.player.x; this.knight.y = G.save.player.y;
     this.drawHero();
     this.returnBurst(this.knight.x, this.knight.y, true);
-    this.cameras.main.flash(260, 200, 230, 255);
+    if (!this.prefs?.calm) this.cameras.main.flash(260, 200, 230, 255); // ⑤ #6
     this.invulnUntil = this.gt + 1500;
     for (const m of this.monsters) m.aggro = false;
     hud.log(byScroll ? `사냥터 이동 주문서를 읽어 ${josa(name, '으로/로')} 왔습니다` : `순간이동 마법사가 ${josa(name, '으로/로')} 보내 주었습니다`);
@@ -429,11 +451,14 @@ export class WorldScene extends Phaser.Scene {
       if (e.key >= '1' && e.key <= String(PAGE_SIZE)) { e.preventDefault(); this.useSlot(Number(e.key) - 1); }
       else if (e.key === 'Tab') { e.preventDefault(); this.flipPage(); }
     });
+    for (const [id, v] of [['cycleOff', false], ['cycleOn', true]]) {
+      document.getElementById(id)?.addEventListener('click', () => { this.prefs.cycle = v; if (!v) this.cancelCycle(); savePrefs(this.prefs); this.refreshZoomButtons(); });
+    }
     for (const [id, v] of [['calmOff', false], ['calmOn', true]]) {
       document.getElementById(id)?.addEventListener('click', () => { this.prefs.calm = v; savePrefs(this.prefs); this.refreshZoomButtons(); });
     }
     on('btnAuto', () => {
-      if (G.auto) { this.setAuto(false); return; }
+      if (G.auto) { this.setAuto(false); this.cancelCycle(); return; } // 16차 ⑦ #1: 손으로 끄면 순환도
       if (mapIdAt(this.knight.x) === 'town') { hud.toast('자동 사냥은 사냥터에서 켜 주세요'); return; }
       if (inBossRoom(this.knight.x, this.knight.y)) { hud.toast('보스는 직접 싸워 주세요'); return; }
       // 6차: 켜자마자 귀환(주문서 낭비)하지 않게 — 물약이 없거나 체력이 귀환 기준 이하면 켜지 않고 안내만
@@ -542,6 +567,8 @@ export class WorldScene extends Phaser.Scene {
     // 5차: 공격 대기 중 눌러 둔 스킬은 자동 사냥보다 먼저 쓴다(자동 공격이 차례를 계속 가져가지 않게)
     if (this.queuedSkill && this.attackCd <= 0) { const id = this.queuedSkill; this.queuedSkill = null; this.useSkill(id, null, true); }
     const v = this.joy.vector();
+    // 16차 ⑦ #1: 조이스틱을 쓰면 순환 단계와 상관없이(출발 저장 대기·출발 뒤 포함) 순환 취소
+    if (v.active && (this.cycle || this.cycleLeftAt)) this.cancelCycle(this.cycle ? '직접 움직여서 자동 순환을 멈췄습니다' : null);
     let walking = false;
     if (v.active && (v.x || v.y)) {
       const sp = this.moveSpeed();
@@ -577,7 +604,11 @@ export class WorldScene extends Phaser.Scene {
     this.morphLook();
     this.updateGroundItems(now);
     this.updateTalk();
+    this.updateDoll(dt);
+    this.updateNight();
     this.updateRegion();
+    if (this.restockDue) { this.tryRestock(); if (G.pending) return; } // ⑤ #10: 저장 실패로 대기가 생기면 이 프레임은 여기서 끝
+    if (this.cycle) { this.tickCycle(now, v.active); if (G.pending) return; }
     this.tickRegen(dt);
 
     this.bossTick += dt;
@@ -603,9 +634,76 @@ export class WorldScene extends Phaser.Scene {
     this.refreshSkills();
   }
 
+  // 13차 자동 보충: 목표 개수까지 모자란 만큼 한 거래로 산다. 저장 대기·다른 창이면 다음 프레임에 다시(사라지지 않음)
+  // manual = 잡화상 [지금 채우기] — 채울 것이 없을 때도 알린다
+  // ⑤ #7·#8: 대기(restockDue)는 마을에 들어올 때 켜지고, 마을을 떠나면 꺼진다. 시도하면(샀든 못 샀든) 그 방문은 끝.
+  // 저장 실패면 같은 후보가 G.pending으로 다시 시도된다(다시 계산하지 않음)
+  tryRestock(manual = false) {
+    if (!manual && mapIdAt(this.knight.x) !== 'town') { this.restockDue = false; return false; }
+    if (!G.save?.restock) { this.restockDue = false; if (manual) hud.toast('자동 보충 목표가 없습니다'); return false; }
+    if (G.pending || G.lockedByOtherTab) return false;
+    this.restockDue = false;
+    const res = inv.restock(G.save, bal);
+    if (!res.ok) {
+      if (manual || res.why === 'gold' || res.why === 'bag') hud.toast(`자동 보충 · ${res.reason}`, 2600);
+      return false;
+    }
+    const text = res.lines.map((l) => `${itemDef(l.id, bal).name} ${l.count.toLocaleString('ko-KR')}개`).join(' · ');
+    return G.commit(res.save, 'restock', {
+      after: () => {
+        const msg = `자동 보충 · ${text} (−${res.cost.toLocaleString('ko-KR')}원)${res.short ? ' · 돈·가방이 모자라 일부만' : ''}`;
+        hud.toast(msg, 3200); hud.log(msg);
+        this.refreshHud(true); this.refreshSkills(true); G.ui?.refresh();
+      },
+    });
+  }
+
+  // ⑤ #2·#3: 순환 취소는 여기 한 곳(번호를 올려 늦게 끝나는 저장 콜백도 자동을 켜지 못하게)
+  cancelCycle(reason) {
+    if (this.cycle && reason) hud.toast(reason, 2400);
+    this.cycle = null;
+    this.cycleGen = (this.cycleGen ?? 0) + 1;
+    // 멈추면 '연속 재귀환' 셈도 처음부터(순환으로 출발했을 때만 다시 셈)
+    this.cycleLeftAt = 0; this.cycleQuick = 0;
+  }
+  // 16차 자동 순환: 자동 보충이 끝나면 2초 뒤 같은 사냥터 입구로(마법사 값) 가서 자동 사냥을 다시 켠다.
+  // 조이스틱을 움직이거나 마을을 떠나면 취소, 물약이 없거나 돈이 모자라면 멈추고 알림
+  tickCycle(now, touching) {
+    const c = this.cycle, cfg = bal.cycle;
+    if (touching) { this.cancelCycle('직접 움직여서 자동 순환을 멈췄습니다'); return; }
+    if (mapIdAt(this.knight.x) !== 'town' || !this.prefs?.cycle) { this.cancelCycle(); return; }
+    if (this.restockDue || G.pending || G.lockedByOtherTab) return;
+    const name = bal.teleport.find((t) => t.id === c.area)?.name ?? c.area;
+    // ⑤ #4: 물약이 출발 기준보다 적으면 멈춤
+    if (inv.potionCount(G.save, bal) < cfg.minPotions) { this.cancelCycle(`물약이 ${cfg.minPotions}개보다 적어 자동 순환을 멈췄습니다(잡화상 [자동 보충]에서 목표를 정해 주세요)`); return; }
+    // ⑤ #1: 체력이 출발 기준(최대의 90%)이 될 때까지 마을에서 기다림(상한 넘으면 멈춤)
+    const maxHp = this.stats().maxHp;
+    if (G.save.player.hp < maxHp * cfg.hpRatio) {
+      if (!c.hpWait) { c.hpWait = now; hud.toast('자동 순환 — 체력이 찰 때까지 마을에서 기다립니다', 2200); }
+      if (now - c.hpWait > cfg.waitHpMs) this.cancelCycle('체력이 차지 않아 자동 순환을 멈췄습니다');
+      return;
+    }
+    if (!c.at) { c.at = now + 2000; hud.toast(`자동 순환 — 2초 뒤 ${josa(name, '으로/로')} 돌아갑니다`, 1800); return; }
+    if (now < c.at) return;
+    const gen = this.cycleGen;
+    this.cycle = null;
+    const here = { ...G.save, player: { ...G.save.player, ...this.positionOf() } };
+    const res = inv.mapTeleport(here, c.area, bal);
+    if (!res.ok) { hud.toast(`자동 순환을 멈췄습니다 — ${res.reason}`, 3200); return; }
+    G.commit(res.save, 'teleport', { keepPosition: true, after: () => {
+      this.applyTeleport(name, false, { fromCycle: true });
+      // ⑤ #2: 저장이 늦게 끝났고 그사이 취소됐으면(설정 끄기·쓰러짐·직접 이동) 자동을 켜지 않음
+      if (gen !== this.cycleGen || !this.prefs?.cycle) return;
+      this.cycleLeftAt = this.gt;
+      this.setAuto(true);
+      hud.toast(`자동 순환 — ${name}에서 다시 사냥합니다 (−${res.cost.toLocaleString('ko-KR')}원)`, 2600);
+    } });
+  }
+
   updateRegion() {
     const r = mapIdAt(this.knight.x);
     if (r !== this.region) {
+      if (r === 'town') this.restockDue = true; // 13차: 마을에 들어올 때마다 한 번 자동 보충
       this.region = r;
       this.tweens.killTweensOf(this.dark);
       this.tweens.add({ targets: this.dark, alpha: DARK_REGIONS.has(r) ? 1 : 0, duration: 700 });
@@ -677,6 +775,23 @@ export class WorldScene extends Phaser.Scene {
   }
   // ---------- 12차 칭호·목표판 ----------
   // 머리 위 칭호(금색 작은 글씨, 변신하면 변신 이름 위)
+  // 15차 마법인형: 기사 뒤에서 따라다니는 작은 빛 정령(인형 색). 그림 파일 없이 그래픽으로
+  updateDoll(dt) {
+    const id = G.save?.dolls?.cur, d = id ? (bal.dolls ?? []).find((x) => x.id === id) : null;
+    if (!this.dollG) this.dollG = this.add.graphics();
+    this.dollG.clear();
+    if (!d) { this.dollPos = null; return; }
+    const tx = this.knight.x + (this.facingLeft ? 12 : -12), ty = this.knight.y - 20;
+    if (!this.dollPos) this.dollPos = { x: tx, y: ty };
+    const k = Math.min(1, dt * 5);
+    this.dollPos.x += (tx - this.dollPos.x) * k; this.dollPos.y += (ty - this.dollPos.y) * k;
+    const x = this.snap(this.dollPos.x), y = this.snap(this.dollPos.y + Math.sin(this.gt / 280) * 2);
+    this.dollG.setDepth(this.hero.depth + 0.5);
+    this.dollG.fillStyle(d.color, 0.22).fillCircle(x, y, 7);
+    this.dollG.fillStyle(d.color, 0.95).fillCircle(x, y, 3.5);
+    this.dollG.fillStyle(0xffffff, 0.9).fillCircle(x - 1, y - 1, 1.2);
+  }
+
   titleLook() {
     const t = G.save?.title ? col.titleDef(G.save.title, bal) : null;
     if (!this.titleLabel) this.titleLabel = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '6px', fontStyle: 'bold', color: '#f0c860', stroke: '#2a1a00', strokeThickness: 2, resolution: 4 }).setOrigin(0.5).setDepth(999);
@@ -807,13 +922,13 @@ export class WorldScene extends Phaser.Scene {
   }
   // 사냥터 이동 주문서: 목록만 열고(소모 없음) 고른 순간 다시 검사해 1장 쓴다(⑤ #26)
   // ignorePause: 창(가방·주문서 목록)이 열려 게임이 멈춘 상태에서 고를 때 — 멈춤 사유는 창 하나뿐이어야 함
-  huntScrollBlock({ ignorePause = false } = {}) {
+  huntScrollBlock({ ignorePause = false, noScroll = false } = {}) { // 16차: noScroll = 지도 순간이동(주문서 개수는 안 봄)
     const onlyWindow = G.pause.size === 1 && G.pause.has('window');
     if (!this.playing || !G.save || G.pending || (ignorePause ? !(G.pause.size === 0 || onlyWindow) : !this.canAct())) return '지금은 쓸 수 없습니다';
     if (G.save.player.hp <= 0) return '쓰러진 상태에서는 쓸 수 없습니다';
     if (inBossRoom(this.knight.x, this.knight.y)) return '보스 방에서는 쓸 수 없습니다';
     if (this.casting) return '필살기를 쓰는 중에는 쓸 수 없습니다';
-    if (countOf(G.save, 'huntScroll') <= 0) return '사냥터 이동 주문서가 없습니다';
+    if (!noScroll && countOf(G.save, 'huntScroll') <= 0) return '사냥터 이동 주문서가 없습니다';
     return null;
   }
   openHuntScroll() {
@@ -874,7 +989,7 @@ export class WorldScene extends Phaser.Scene {
   // 공격 스킬은 일반 공격 한 번을 대신한다(공격 대기 중이면 손으로 누른 것은 예약). 방어 스킬은 공격 차례와 무관(⑤ #10)
   useSkill(id, target, manual) {
     if (!this.canAct()) return false;
-    const def = skillDef(id, bal), lv = G.save.player.level;
+    const def = this.sk(id), lv = G.save.player.level; // 14차: 스킬 레벨 반영
     if (lv < def.level) { if (manual) hud.toast(`${def.name}은(는) Lv ${def.level}에 배웁니다`); return false; }
     if (this.casting) { if (manual) hud.toast('필살기를 쓰는 중입니다'); return false; }
     if (this.skillLeft(id) > 0) { if (manual) hud.toast(`${def.name} 준비 중 (${Math.ceil(this.skillLeft(id) / 1000)}초)`); return false; }
@@ -1015,7 +1130,7 @@ export class WorldScene extends Phaser.Scene {
     const x = this.knight.x, y = this.knight.y;
     this.skillAt.ult = this.gt + def.cooldownMs;
     this.attackCd = def.castMs / 1000 + this.stats().attackMs / 1000;
-    this.casting = { id: 'ult', at: this.gt + def.castMs, gen: this.castGen, map: mapIdAt(x), stats: this.stats(), level: G.save.player.level, manual, target: target?.uid ?? null };
+    this.casting = { id: 'ult', at: this.gt + def.castMs, gen: this.castGen, map: mapIdAt(x), stats: this.stats(), level: G.save.player.level, manual, target: target?.uid ?? null, def };
     this.casting.sword = this.fx.ultCast(x, y, def.castMs);
     this.hero.setTint(0xffe9a0);
     this.fx.title(x, y - 32, def.name, '#ffe070', 10, 900);
@@ -1029,7 +1144,7 @@ export class WorldScene extends Phaser.Scene {
     this.restoreTint();
     const ok = c.gen === this.castGen && this.canAct() && G.save.player.hp > 0 && mapIdAt(this.knight.x) === c.map;
     if (!ok) { this.cancelCasting(c, true); return; }
-    const def = skillDef('ult', bal), r = def.radiusTiles * TILE;
+    const def = c.def ?? this.sk('ult'), r = def.radiusTiles * TILE; // 14차 ⑤ #7: 시전 순간의 스킬 레벨로
     this.fx.ultImpact(this.knight.x, this.knight.y, r, c.sword);
     const fixed = { stats: c.stats, level: c.level };
     const list = this.monsters.filter((m) => this.canHit(m) && this.dist(m) <= r && (c.manual || m.aggro || m.uid === c.target));
@@ -1089,7 +1204,7 @@ export class WorldScene extends Phaser.Scene {
       const e = s.hotbar?.slots[page * PAGE_SIZE + i];
       if (!e) { list.push({ i, empty: true }); continue; }
       if (e.t === 'skill') {
-        const d = skillDef(e.id, bal);
+        const d = this.sk(e.id);
         list.push({ i, kind: 'skill', id: e.id, name: d.name, icon: `sk_${e.id}`, label: d.short, left: this.skillLeft(e.id), total: d.cooldownMs, active: this.buffOn(e.id), casting: this.casting?.id === e.id });
       } else {
         const pd = bal.consumables.find((c) => c.id === e.id);
@@ -1135,7 +1250,7 @@ export class WorldScene extends Phaser.Scene {
 
   // 반격의 기운(⑤ #3): 맞았고 안 막혔고 피해가 있을 때만, 기사가 살아 있을 때. 반격 처치는 일반 처치 경로
   counterHit(m, r) {
-    const dmg = counterDamage(r, bal);
+    const dmg = counterDamage(r, bal, this.sk('counter').counterPct);
     if (!dmg || !this.canHit(m)) return;
     m.hp -= dmg; m.hurtAt = this.gt; m.aggro = true;
     this.fx.countered(m.sprite.x, m.sprite.y, dmg);
@@ -1164,7 +1279,7 @@ export class WorldScene extends Phaser.Scene {
     this.rec.kills++; this.rec.exp += res.pct;
     if (res.quest) this.rec.gold += res.quest.gold;
     const r = { level: s.player.level };
-    // 돈·아이템은 리니지처럼 그 자리에 떨어뜨린다(지나가면 줍고, 저장에 성공해야 확정)
+    // 돈·아이템은 옛날 온라인 게임처럼 그 자리에 떨어뜨린다(지나가면 줍고, 저장에 성공해야 확정)
     const mx = m.sprite.x, my = m.sprite.y;
     if (rw.gold > 0) this.dropOnGround('gold', 'gold', rw.gold, mx, my);
     for (const d of rw.drops) this.dropOnGround('item', d.id, d.count, mx, my);
@@ -1393,9 +1508,22 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  useReturn(why) {
+  useReturn(why, { auto = false } = {}) {
     const res = inv.useReturnScroll(G.save, bal);
     if (!res.ok) { hud.toast(res.reason || '귀환 주문서가 없습니다'); return false; }
+    // 16차 자동 순환: 자동 사냥이 스스로 귀환했고(⑤ #5: 출처로 판단) 켜져 있으면, 마을에서 채운 뒤 같은 사냥터로 돌아간다.
+    // ⑤ #4: 출발한 지 얼마 안 돼 또 귀환하는 일이 연속되면 멈춘다
+    const area = this.autoArea, cfg = bal.cycle;
+    const leftAt = this.cycleLeftAt, prevQuick = this.cycleQuick ?? 0; // 취소가 지우기 전에 읽어 둔다
+    this.cancelCycle();
+    if (auto && this.prefs?.cycle && area && bal.teleport.some((t) => t.id === area)) {
+      const quick = leftAt && this.gt - leftAt < cfg.quickMs;
+      this.cycleQuick = quick ? prevQuick + 1 : 0;
+      if (this.cycleQuick >= cfg.quickMax) {
+        this.cycleQuick = 0;
+        this.time.delayedCall(800, () => hud.toast('출발하자마자 또 귀환해서 자동 순환을 멈췄습니다 — 물약 목표를 늘리거나 더 쉬운 사냥터로 옮겨 보세요', 4200));
+      } else this.cycle = { area, at: 0, since: this.gt, gen: this.cycleGen };
+    }
     G.save = res.save;
     this.teleportTown();
     hud.log(why === '직접' ? '귀환 주문서를 읽어 마을로 돌아왔습니다' : `${why} — 귀환 주문서로 마을에 돌아왔습니다`);
@@ -1414,7 +1542,7 @@ export class WorldScene extends Phaser.Scene {
     if (effect) this.returnBurst(this.knight.x, this.knight.y, false);
     this.knight.x = this.wmap.spawn.x; this.knight.y = this.wmap.spawn.y;
     this.drawHero();
-    if (effect) { this.returnBurst(this.knight.x, this.knight.y, true); this.cameras.main.flash(260, 255, 244, 214); }
+    if (effect) { this.returnBurst(this.knight.x, this.knight.y, true); if (!this.prefs?.calm) this.cameras.main.flash(260, 255, 244, 214); }
     this.invulnUntil = this.gt + 1500;
     for (const m of this.monsters) m.aggro = false;
   }
@@ -1429,7 +1557,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   // 9차(⑤ #2): 받는 피해 감소 = 아머 + 불굴(맞기 직전 체력 기준), 상한 있음
-  incomingReduce(now) { const st = this.stats(); return incomingReduce({ guardOn: now < this.guardUntil, hp: Math.max(0, G.save.player.hp), maxHp: st.maxHp }, st, bal); }
+  incomingReduce(now) { const st = this.stats(); return incomingReduce({ guardOn: now < this.guardUntil, hp: Math.max(0, G.save.player.hp), maxHp: st.maxHp, guardReduce: this.sk('guard').reduce }, st, bal); }
+  // 14차: 스킬 레벨을 반영한 정의(배수·쿨타임·효과) — 게임 안 스킬 효과는 모두 이것으로
+  sk(id) { return skillAt(id, skillLevel(G.save, id), bal); }
 
   hurtPlayer(dmg, color = '#ff6b5e') {
     const p = G.save.player;
@@ -1448,10 +1578,13 @@ export class WorldScene extends Phaser.Scene {
     p.level = after.level; p.exp = after.exp;
     p.hp = this.stats().maxHp;
     const lost = before.exp - after.exp;
+    this.cancelCycle(); // 16차 ⑤ #3
+    // 15차: 잃은 경험치를 남겨 마을 순간이동 마법사에게 돈으로 되찾게(마지막 한 번만)
+    if (lost > 0) G.save.recover = { exp: lost }; else delete G.save.recover;
     this.teleportTown(false);
     this.cameras.main.fadeIn(600, 0, 0, 0);
     hud.toast(`쓰러졌습니다. 경험치를 ${lost.toLocaleString("ko-KR")} 잃고 마을에서 깨어났습니다`, 3200);
-    hud.log(`쓰러졌습니다 · 경험치 -${lost.toLocaleString('ko-KR')}`);
+    hud.log(`쓰러졌습니다 · 경험치 -${lost.toLocaleString('ko-KR')}${lost > 0 ? ' — 마을 순간이동 마법사에게서 돈을 내고 되찾을 수 있습니다' : ''}`);
     G.persist('death');
   }
 
@@ -1508,7 +1641,7 @@ export class WorldScene extends Phaser.Scene {
 
     switch (a.action) {
       case 'potion': this.drinkPotion(false); return false;
-      case 'return': if (!this.useReturn(`자동 사냥(${a.reason})`)) this.stopAuto(a.reason); return false;
+      case 'return': if (!this.useReturn(`자동 사냥(${a.reason})`, { auto: true })) this.stopAuto(a.reason); return false;
       case 'stop': this.stopAuto(a.reason); return false;
       case 'attack':
         if (tgt) {
@@ -1521,7 +1654,7 @@ export class WorldScene extends Phaser.Scene {
       case 'skill': {
         // 9차(⑤ #10): 방어·회복은 정의대로 대상·공격 차례와 무관. 공격 스킬은 일반 공격 한 번을 대신(못 쓰면 일반 공격),
         // 돌진은 못 하면(길 막힘) 걸어서 쫓는다
-        const def = skillDef(a.skillId, bal);
+        const def = this.sk(a.skillId);
         if (!def.usesAttack) { this.useSkill(a.skillId, tgt, false); return false; }
         if (!tgt) return false;
         if (a.skillId === 'dash') {
@@ -1729,7 +1862,7 @@ export class WorldScene extends Phaser.Scene {
           if (m.def.isBoss && ++m.attacks % bal.boss.slamEvery === 0) { this.startSlam(m); m.cd += bal.boss.slamWarnMs / 1000; }
           else if (now >= this.invulnUntil) {
             // 9차: 막기(켜져 있으면 막기 확률) · 아머+불굴 감소 · 반격(살아 있을 때만)
-            const blockPct = now < this.blockUntil ? skillDef('block', bal).blockPct : 0;
+            const blockPct = now < this.blockUntil ? this.sk('block').blockPct : 0;
             const r = combat.monsterAttack(m.def, st, G.save.player.level, this.rng, bal, { reduce: this.incomingReduce(now), blockPct });
             let died = false;
             if (r.blocked) this.fx.blocked(this.knight.x, this.knight.y);
@@ -1902,7 +2035,7 @@ export class WorldScene extends Phaser.Scene {
       level: lv, hp: s.player.hp, maxHp: st.maxHp, expPct: maxLevel ? 100 : (100 * s.player.exp) / need, maxLevel,
       gold: s.player.gold, potions: inv.potionCount(s, bal), scrolls: countOf(s, 'returnScroll'),
       notice: inv.unspentPoints(s, bal) > 0 || inv.readyRewards(s, bal).length > 0 || (this.newTitles?.size ?? 0) > 0 || col.codexReady(s, bal),
-      place: inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x)),
+      place: `${inBossRoom(this.knight.x, this.knight.y)?.name ?? regionName(mapIdAt(this.knight.x))}${this.isNight ? ' ☾' : ''}${this.cycle ? ' ↻' : ''}`,
     });
     hud.setBag(s.bag.length, bal.inventory.bagSlots);
     hud.setQuest(this.questBoard());

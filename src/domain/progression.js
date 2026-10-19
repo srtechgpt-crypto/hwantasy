@@ -57,7 +57,8 @@ export function attributes(level, bonus, bal) {
 // defs = 장착한 장비 정의 목록. 반환 [{ tier, name, count, stage(0·3·5·7), next(다음 단계 개수|null), fx{hp,def,dmg,crit} }] (count ≥ 1인 등급만, 등급 순)
 export function activeSets(defs, bal) {
   const count = {};
-  for (const d of defs) if (d?.kind === 'armor' && d.slot && d.slot !== 'armor' && d.tier) count[d.tier] = (count[d.tier] ?? 0) + 1;
+  // 18차: 장신구(목걸이·반지)는 세트에 세지 않음(7부위만)
+  for (const d of defs) if (d?.kind === 'armor' && d.slot && d.slot !== 'armor' && !d.acc && d.tier) count[d.tier] = (count[d.tier] ?? 0) + 1;
   return (bal.sets ?? []).filter(set => count[set.tier]).map(set => {
     const n = count[set.tier], fx = { hp: 0, def: 0, dmg: 0, crit: 0 };
     let stage = 0;
@@ -91,7 +92,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
   // 10차 무기 계열: 최종 피해 %(dmgPct), 공격 간격 %(speedPct — 최소 간격도 같은 비율), 치명·명중 %p
   const speed = 100 + (wdef?.speedPct ?? 0);
   const a = attributes(level, bonus, bal);
-  if (extra) { a.str += extra.str ?? 0; a.dex += extra.dex ?? 0; }
+  if (extra) { a.str += extra.str ?? 0; a.dex += extra.dex ?? 0; a.con += extra.con ?? 0; } // 15차: 엘릭서 체력
   const k = bal.knight, st = bal.stats, pm = passiveMods(level, bal);
   const str = a.str - st.base, dex = a.dex - st.base, con = a.con - st.base;
   const pmHp = perm?.hp ?? 0, pmDef = perm?.def ?? 0, pmDmg = perm?.dmg ?? 0, pmHit = perm?.hit ?? 0;

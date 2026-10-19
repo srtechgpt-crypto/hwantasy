@@ -99,13 +99,21 @@
       <button class="wide" id="btnResume" type="button">게임으로 돌아가기</button>
       <!-- 2026-10-17 대표님: 게임 중 새 버전을 다 받으면 저장 후 바로 바꾸기(홈 화면 앱에서만 보임) -->
       <button class="wide update" id="btnUpdate" type="button" hidden><span id="updLabel">지금 업데이트</span> <small id="updVer"></small></button>
+      <!-- 13차: 늘 보이는 [업데이트 확인] — 누르면 바로 새 버전을 찾는다(홈 화면 앱에서만) -->
+      <button class="wide ghost" id="btnCheckUpd" type="button"><span id="chkLabel">업데이트 확인</span> <small id="curVer"></small></button>
       <div class="zoomrow"><span>화면 크기</span>
         <div class="seg"><button id="zoomFar" type="button">멀리</button><button id="zoomMid" type="button">보통</button><button id="zoomNear" type="button">가까이</button></div>
       </div>
       <div class="zoomrow"><span>흔들림·번쩍임</span>
         <div class="seg"><button id="calmOff" type="button">보통</button><button id="calmOn" type="button">줄이기</button></div>
       </div>
+      <!-- 16차: 자동 사냥이 스스로 귀환하면 채우고 같은 사냥터로 돌아가 다시 사냥 -->
+      <div class="zoomrow"><span>자동 순환</span>
+        <div class="seg"><button id="cycleOff" type="button">끄기</button><button id="cycleOn" type="button">켜기</button></div>
+      </div>
       <button class="wide" id="btnRates" type="button">배율 바꾸기 <small id="menuRate"></small></button>
+      <!-- 17차: 즐겨찾기 사냥터로 바로(지도 지역 탭의 ☆로 정함) -->
+      <button class="wide" id="btnFav" type="button" hidden>★ <span id="favName"></span></button>
       <button class="wide ghost" id="btnSaveNow" type="button">지금 저장</button>
       <button class="wide ghost" id="btnExport" type="button">저장 내보내기</button>
       <button class="wide ghost" id="btnImport" type="button">저장 가져오기</button>
@@ -161,7 +169,8 @@
     let target = null;
     // 시작 화면 자동 교체 뒤 버전 확인이 늦으면 주기 작업에서 다시 확인한다(⑦)
     let autoTarget = null;
-    const api = window.__hwUpdate = { state: "none", version: "", apply: manualApply };
+    // 13차: current = 지금 쓰는 버전, check() = [업데이트 확인] 버튼(바로 새 버전 찾기)
+    const api = window.__hwUpdate = { state: "none", version: "", current: "", apply: manualApply, check: checkNow };
     function setState(state, version) {
       if (api.state === state && api.version === version) return;
       api.state = state; api.version = version;
@@ -219,6 +228,7 @@
         }
         const data = await message(worker, "status");
         if (worker !== (navigator.serviceWorker.controller || (registration && registration.active))) return;
+        if (data.ready && data.version) api.current = data.version;
         let text = data.ready ? "오프라인 준비 완료 · v" + data.version.slice(0, 6) : UNAVAILABLE;
         // 이미 설치된 앱이 새 버전을 받는 중이면 기다리면 된다는 것을 알려 준다(받기가 끝나거나 실패하면 이 문구는 사라짐)
         if (registration && registration.installing && navigator.serviceWorker.controller) {
@@ -274,7 +284,8 @@
       if (!target || reloading || navigator.serviceWorker.controller !== target.worker) return false;
       const hw = window.__hw;
       if (hw && hw.pending) return false;
-      try { if (hw && hw.started && hw.persist) hw.persist("update"); } catch (_) {}
+      // 13차(⑤ #14): 마지막 저장이 실패하면 새로고침하지 않는다(저장 실패 창이 뜨고, 다음 확인 때 다시)
+      try { if (hw && hw.started && hw.persist && !hw.persist("update")) return false; } catch (_) { return false; }
       try { sessionStorage.setItem("hwantasy-reloaded-" + target.version, "1"); } catch (_) {}
       reloading = true;
       location.reload();
@@ -318,6 +329,37 @@
         await registration.update();
       } catch (_) {}
       finally { await status(); await applyWaiting(); }
+    }
+
+    // 13차 [업데이트 확인]: 60초 제한 없이 바로 서버에 묻고, 새 버전을 다 받을 때까지 최대 20초 기다린다.
+    // 결과 {result: ready|latest|offline|busy|error, version}. ready면 기존 [지금 업데이트] 흐름(hw-update)을 그대로 쓴다
+    let checkingNow = null;
+    function checkNow() {
+      if (!checkingNow) checkingNow = runCheck().finally(() => { checkingNow = null; });
+      return checkingNow;
+    }
+    async function runCheck() {
+      if (!registration) return {result: "error"};
+      await checkWaiting();
+      if (api.state === "ready" || api.state === "applying") return {result: "ready", version: api.version};
+      if (navigator.onLine === false) return {result: "offline"};
+      const deadline = performance.now() + 20000;
+      lastUpdate = performance.now();
+      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+      try {
+        const done = await Promise.race([registration.update().then(() => true), sleep(15000).then(() => false)]);
+        if (!done) return {result: "busy"};
+      } catch (_) { return {result: navigator.onLine === false ? "offline" : "error"}; }
+      let quietSince = performance.now();
+      while (performance.now() < deadline) {
+        await checkWaiting();
+        if (api.state === "ready") return {result: "ready", version: api.version};
+        // 받는 중도 기다리는 것도 1초 넘게 없으면 새 버전이 없는 것(⑦ #2: 시각으로 잰다)
+        if (registration.installing || registration.waiting) quietSince = performance.now();
+        else if (performance.now() - quietSince > 1000) return {result: "latest", version: api.current};
+        await sleep(250);
+      }
+      return {result: "busy"};
     }
 
     async function controllerChanged() {

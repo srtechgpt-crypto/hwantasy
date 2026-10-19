@@ -1,4 +1,5 @@
 // 화면 사이에서 함께 쓰는 게임 상태와 상태줄(HUD) 갱신.
+import { fmtGold, expDigits } from './ui/format.js';
 export const G = {
   save: null,          // 저장 객체(정본)
   pause: new Set(),    // 멈춤 사유: title, menu, portrait, hidden, saveFail
@@ -32,9 +33,10 @@ export const hud = {
     $('hudLv').textContent = `Lv ${level}`;
     $('hudHp').textContent = `${Math.max(0, Math.ceil(hp))}/${maxHp}`;
     $('hudHpBar').style.width = `${Math.max(0, Math.min(100, (100 * hp) / maxHp))}%`;
-    $('hudExp').textContent = maxLevel ? '최대 레벨' : `${expPct.toFixed(2)}%`;
+    $('hudExp').textContent = maxLevel ? '최대 레벨' : `${expPct.toFixed(expDigits(level))}%`; // 17차: 25레벨부터 넷째 자리
     $('hudExpBar').style.width = `${maxLevel ? 100 : expPct}%`;
-    $('hudGold').textContent = gold.toLocaleString('ko-KR');
+    $('hudGold').textContent = fmtGold(gold); // 17차: 10만 이상 '12.3만'
+    $('hudGold').title = `${gold.toLocaleString('ko-KR')}원`;
     $('cntPotion').textContent = potions;
     $('cntReturn').textContent = scrolls;
     $('hudPlace').textContent = place;

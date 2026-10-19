@@ -22,20 +22,20 @@ export function createJoystick({ zone, radius = 52, onRelease } = {}) {
     base.style.left = knob.style.left = st.ox + 'px'; base.style.top = knob.style.top = st.oy + 'px';
     show(true);
   });
-  addEventListener('pointermove', (e) => {
+  addEventListener('pointermove', (e) => { // 13차(⑤ #13): 캡처 단계 — 반쪽 가방 위로 지나가도 받음
     if (e.pointerId !== st.id) return;
     st.x = e.clientX; st.y = e.clientY;
     const dx = st.x - st.ox, dy = st.y - st.oy, d = Math.hypot(dx, dy), k = d > radius ? radius / d : 1;
     knob.style.left = st.ox + dx * k + 'px'; knob.style.top = st.oy + dy * k + 'px';
-  });
+  }, true);
   const end = (e) => {
     if (e.pointerId !== st.id) return;
     release();
     onRelease?.();
   };
   function release() { st.id = null; st.active = false; show(false); }
-  addEventListener('pointerup', end);
-  addEventListener('pointercancel', end);
+  addEventListener('pointerup', end, true);
+  addEventListener('pointercancel', end, true);
 
   return {
     vector() {

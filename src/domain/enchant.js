@@ -1,4 +1,4 @@
-import { assertRates, fail, integer, itemDef, random, isGearDef, slotOf, enchantRule } from './common.js';
+import { assertRates, fail, integer, itemDef, random, isGearDef, slotOf, enchantRule, isLocked, LOCKED_ENCHANT } from './common.js';
 import { removeItem } from './inventory.js';
 import { validate, settleHp } from './save.js';
 
@@ -16,6 +16,7 @@ export function enchantInfo(item, rates, bal) {
 export function tryEnchant(save, uid, rng, bal) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
   const item = save.bag.find(item => item.uid === uid);
+  if (isLocked(item)) return fail(LOCKED_ENCHANT); // 13차
   let info;
   try { info = enchantInfo(item, save.rates, bal); }
   catch { return fail('강화할 장비가 아닙니다'); }
@@ -56,6 +57,7 @@ export function enchantPlan(item, target, rates, bal) {
 export function enchantTo(save, uid, target, rng, bal) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
   const item = save.bag.find(it => it.uid === uid);
+  if (isLocked(item)) return fail(LOCKED_ENCHANT); // 13차
   let plan;
   try { plan = enchantPlan(item, target, save.rates, bal); }
   catch (e) { return fail(e instanceof RangeError ? e.message : '강화할 장비가 아닙니다'); }
@@ -99,6 +101,7 @@ export function blessedPlan(item, rates, bal) {
 export function tryBlessed(save, uid, rng, bal) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
   const item = save.bag.find(it => it.uid === uid);
+  if (isLocked(item)) return fail(LOCKED_ENCHANT); // 13차
   let plan;
   try { plan = blessedPlan(item, save.rates, bal); }
   catch (e) { return fail(e instanceof RangeError ? e.message : '강화할 장비가 아닙니다'); }
@@ -126,6 +129,7 @@ export function lowerEnchant(save, uid, bal) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
   const item = save.bag.find(it => it.uid === uid);
   if (!isGearDef(itemDef(item?.id, bal))) return fail('장비가 아닙니다');
+  if (isLocked(item)) return fail(LOCKED_ENCHANT); // 13차
   if (!(item.enchant > 0)) return fail('이미 +0입니다');
   const consumed = removeItem(save, 'downScroll', 1, bal);
   if (!consumed.ok) return fail('강화 하락 주문서가 없습니다');

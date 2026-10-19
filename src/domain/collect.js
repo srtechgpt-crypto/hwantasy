@@ -49,7 +49,7 @@ export function codexPlan(save, setId, bal) {
   const plan = [];
   for (const id of set.items) {
     if (have.includes(id)) continue;
-    const item = save.bag.filter(it => it.id === id && it.enchant === 0 && it.count === 1 && !worn.has(it.uid)).sort((a, b) => a.uid - b.uid)[0];
+    const item = save.bag.filter(it => it.id === id && it.enchant === 0 && it.count === 1 && !worn.has(it.uid) && it.lock !== true).sort((a, b) => a.uid - b.uid)[0];
     if (item) plan.push({ id, uid: item.uid });
   }
   return plan;
@@ -83,6 +83,7 @@ export function permOf(save, bal) {
   const add = fx => { for (const k of Object.keys(out)) out[k] += fx?.[k] ?? 0; };
   for (const set of doneSets(save.codex, bal)) add(set.fx);
   if (save.title) add(titleDef(save.title, bal)?.fx);
+  if (save.dolls?.cur) add((bal.dolls ?? []).find(d => d.id === save.dolls.cur)?.fx); // 15차 마법인형
   return out;
 }
 // 경험치 보너스: 영구 경험치%와 (처치면) 두루마리%를 **더해서** 한 번 곱하고 내림(⑤ #12). 배율·저레벨 보정은 이미 들어간 값

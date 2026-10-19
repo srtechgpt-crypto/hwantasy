@@ -7,7 +7,7 @@ import { morphDef, unmorph, rollText } from '../domain/morph.js';
 import { itemDef, isGearDef, slotOf, EQUIP_SLOTS, enchantRule } from '../domain/common.js';
 import { compareGear, compareDetail, loadoutStats } from '../domain/compare.js';
 import { validate, statsOf } from '../domain/save.js';
-import { activeSets } from '../domain/progression.js';
+import { activeSets, needExp } from '../domain/progression.js';
 import { buffDef } from '../domain/buffs.js';
 import estimate from '../../data/estimate.js';
 import { drawWorldMap, regionAtRatio } from './worldmap.js';
@@ -16,19 +16,22 @@ import { bossRemainMs } from '../domain/boss.js';
 import { G, hud, josa } from '../state.js';
 import { savePrefs } from './prefs.js';
 import { assignSlot, setAutoUse, autoUse, PAGE_SIZE, HOTBAR_SLOTS } from '../domain/hotbar.js';
-import { learnedSkills } from '../domain/skills.js';
+import { learnedSkills, skillAt, skillLevel, skillUpCost, cardIdOf } from '../domain/skills.js';
 import * as col from '../domain/collect.js';
+import { elixirOf, dollDef, recoverCost } from '../domain/growth.js';
+import { loadEnchantLog, pushEnchantLog, agoText } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 const won = (n) => n.toLocaleString('ko-KR');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const isGear = (id) => isGearDef(itemDef(id, bal));
 // 8차: 장착 칸 이름(장비 9칸)
-const SLOT_NAMES = { weapon: '무기', armor: '갑옷', helm: '투구', shirt: '티셔츠', cloak: '망토', gloves: '장갑', belt: '벨트', pants: '바지', boots: '부츠' };
+const SLOT_NAMES = { weapon: '무기', armor: '갑옷', helm: '투구', shirt: '티셔츠', cloak: '망토', gloves: '장갑', belt: '벨트', pants: '바지', boots: '부츠', neck: '목걸이', ring: '반지' };
 // 인형 배치(3×3): 망토 투구 장갑 / 무기 갑옷 티셔츠 / 벨트 바지 부츠
-const DOLL = ['cloak', 'helm', 'gloves', 'weapon', 'armor', 'shirt', 'belt', 'pants', 'boots'];
+// 18차: 맨 아래 줄에 장신구(목걸이·반지)
+const DOLL = ['cloak', 'helm', 'gloves', 'weapon', 'armor', 'shirt', 'belt', 'pants', 'boots', 'neck', 'ring'];
 // 빈 칸에 흐리게 보여 줄 그림
-const GHOST = { weapon: 'woodSword', armor: 'clothArmor', helm: 'helm1', shirt: 'shirt1', cloak: 'cloak1', gloves: 'gloves1', belt: 'belt1', pants: 'pants1', boots: 'boots1' };
+const GHOST = { weapon: 'woodSword', armor: 'clothArmor', helm: 'helm1', shirt: 'shirt1', cloak: 'cloak1', gloves: 'gloves1', belt: 'belt1', pants: 'pants1', boots: 'boots1', neck: 'neck1', ring: 'ring1' };
 const icon = (id, cls = '') => `<img class="ic ${cls}" src="assets/icons/${id}.png" alt="">`;
 const itemName = (it) => `${it.enchant ? `+${it.enchant} ` : ''}${itemDef(it.id, bal)?.name ?? it.id}`;
 // 10차: 희귀 장비(금빛 테두리·이름), 무기 계열 이름
@@ -65,14 +68,14 @@ const TITLES = {
 const TABS = {
   bag: [['items', '가방'], ['enchant', '강화']],
   morph: [['morph', '변신 목록']],
-  shop: [['buy', '사기'], ['sell', '팔기']],
+  shop: [['buy', '사기'], ['sell', '팔기'], ['restock', '자동 보충'], ['coin', '보스 코인']],
   smith: [['buy', '사기'], ['sell', '팔기'], ['enchant', '강화']],
   bank: [['bank', '맡기기·찾기']],
-  tele: [['tele', '목적지']],
+  tele: [['tele', '목적지'], ['recover', '경험치 복구']],
   rates: [['rates', '배율 고르기']],
   // 8차 내 정보: 장비 9칸 · 능력치(보너스 점수) · 레벨 보상
   // 12차: 도감(장비 모으기)·칭호
-  me: [['gear', '장비'], ['stats', '능력치'], ['skill', '스킬'], ['reward', '보상'], ['codex', '도감'], ['title', '칭호']],
+  me: [['gear', '장비'], ['stats', '능력치'], ['skill', '스킬'], ['reward', '보상'], ['codex', '도감'], ['title', '칭호'], ['doll', '인형']],
   // 6차 큰 지도: [전체] + 지역마다 한 탭(지역 이름은 짧게)
   map: [['all', '전체'], ...REGIONS.map((r) => [r.id, r.name.split(' ').pop()])],
 };
@@ -112,17 +115,43 @@ export function initWindows() {
     if (kind === 'map' && !opts.tab && G.scene?.knight) opts = { ...opts, tab: mapIdAt(G.scene.knight.x) };
     cur = { kind, scroll: !!opts.scroll, tab: opts.tab ?? TABS[kind][0][0], pick: null, hbSel: null, sel: null, buyId: null, qty: 1, qtyFresh: true, confirm: null, busy: false, fx: null, junk: null, slot: null, draft: null, confirmReset: false };
     if (kind === 'rates') { cur.orig = { ...G.save.rates }; cur.draft = { ...G.save.rates }; }
-    G.pause.add('window');
-    G.scene?.releaseInput();
+    // 13차: 가방은 화면 오른쪽 반쪽에 열고 게임을 멈추지 않는다(자동 사냥 계속). 다른 창은 지금처럼 멈춤
+    cur.half = kind === 'bag';
+    if (cur.half) G.pause.delete('window');
+    else { G.pause.add('window'); G.scene?.releaseInput(); }
+    $('win').classList.toggle('half', cur.half);
     $('win').hidden = false;
+    msg(''); // 15차: 앞 창의 알림 글이 남지 않게
+    render();
+    clearInterval(halfTimer); halfTimer = 0;
+    if (cur.half) { lastSig = sigOf(G.save); halfTimer = setInterval(halfTick, 1000); }
+  }
+  // 13차 반쪽 가방: 1초마다 가방·돈·장착이 바뀌었으면 다시 그린다(처리 중·확인 상자 중이면 기다림, 스크롤 유지)
+  let halfTimer = 0, lastSig = '';
+  const sigOf = (s) => (s ? `${s.player.gold}|${Object.values(s.equip).join(',')}|${s.bag.map((i) => `${i.uid}:${i.id}:${i.count}:${i.enchant ?? ''}:${i.lock ? 1 : 0}`).join(',')}` : '');
+  // 반쪽 가방에서 다른 창(순간이동·변신)으로 넘어가면 보통 창처럼 게임을 멈춘다
+  function unhalf() {
+    if (!cur?.half) return;
+    cur.half = false;
+    clearInterval(halfTimer); halfTimer = 0;
+    $('win').classList.remove('half');
+    G.pause.add('window'); G.scene?.releaseInput();
+  }
+  function halfTick() {
+    if (!cur?.half) { clearInterval(halfTimer); halfTimer = 0; return; }
+    const sig = sigOf(G.save);
+    if (sig === lastSig || cur.busy || cur.confirm || cur.bconfirm || cur.bless || G.pending) return;
+    lastSig = sig;
     render();
   }
   function close() {
     if (!cur) return;
     if (cur.busy) return;
     clearInterval(mapTimer); mapTimer = 0;
+    clearInterval(halfTimer); halfTimer = 0;
     cur = null;
     $('win').hidden = true;
+    $('win').classList.remove('half');
     G.pause.delete('window');
   }
   function msg(text, bad = false) {
@@ -148,18 +177,25 @@ export function initWindows() {
     const [title, ic] = cur.scroll ? ['사냥터 이동 주문서', 'huntScroll'] : TITLES[cur.kind];
     $('winTitle').textContent = title;
     $('winIcon').src = `assets/icons/${ic}.png`;
-    $('winTabs').innerHTML = TABS[cur.kind].length > 1
-      ? TABS[cur.kind].map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
+    const tabList = cur.scroll ? TABS[cur.kind].slice(0, 1) : TABS[cur.kind]; // 15차: 주문서 순간이동 창에는 복구 탭 없음(복구는 마을 마법사만)
+    $('winTabs').innerHTML = tabList.length > 1
+      ? tabList.map(([id, label]) => `<button type="button" class="tab ${cur.tab === id ? 'on' : ''}" data-act="tab" data-tab="${id}">${label}</button>`).join('')
       : '';
     $('winGold').textContent = won(s.player.gold);
-    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, gear: viewGear, stats: viewStats, skill: viewSkill, reward: viewReward, morph: viewMorph, codex: viewCodex, title: viewTitle }[cur.tab];
+    const body = cur.kind === 'map' ? viewMap : { items: viewItems, enchant: viewEnchant, buy: viewBuy, sell: viewSell, bank: viewBank, tele: viewTele, rates: viewRates, restock: viewRestock, coin: viewCoin, gear: viewGear, stats: viewStats, skill: viewSkill, reward: viewReward, morph: viewMorph, codex: viewCodex, title: viewTitle, recover: viewRecover, doll: viewDoll }[cur.tab];
     // 탭 이름 옆 ! (남은 보너스 점수·받을 보상)
     if (cur.kind === 'me') {
       for (const [id, on] of [['stats', inv.unspentPoints(s, bal) > 0], ['reward', inv.readyRewards(s, bal).length > 0], ['codex', col.codexReady(s, bal)], ['title', (G.scene?.newTitles?.size ?? 0) > 0]]) {
         $('winTabs').querySelector(`[data-tab="${id}"]`)?.classList.toggle('notice', on);
       }
     }
+    // 13차: 다시 그려도 스크롤 위치를 지킨다(반쪽 가방은 1초마다 다시 그림)
+    const keep = [...$('winBody').querySelectorAll('[data-keep]')].map((el) => [el.dataset.keep, el.scrollTop]);
+    const top = $('winBody').scrollTop;
     $('winBody').innerHTML = body(s);
+    $('winBody').scrollTop = top;
+    for (const [k, y] of keep) { const el = $('winBody').querySelector(`[data-keep="${k}"]`); if (el) el.scrollTop = y; }
+    if (cur.half) lastSig = sigOf(s);
     $('winBody').dataset.view = cur.kind === 'map' ? 'map' : cur.tab;
     if (cur.kind === 'map') paintMap();
   }
@@ -168,9 +204,20 @@ export function initWindows() {
   let mapTimer = 0; // 열려 있는 동안 1초마다 다시 그림(보스 남은 시간). 스크롤 위치는 그대로
   function viewMap() {
     const all = cur.tab === 'all';
-    return `<div class="worldmap ${all ? 'all' : 'region'}"><canvas id="worldCanvas"></canvas></div>
+    const tele = all ? '' : mapTeleBtn();
+    return `${tele ? `<div class="mapbar maptop">${tele}</div>` : ''}<div class="worldmap ${all ? 'all' : 'region'}"><canvas id="worldCanvas"></canvas></div>
       <p class="maphint">${all ? '지역을 누르면 크게 봅니다' : '손가락으로 밀어 지도를 움직입니다 · ★ 순간이동 도착 · 노란 줄 다른 지역 가는 길 · 주황 네모 보스 방'}</p>
       <div class="mapbar"><button type="button" class="act" data-act="minitoggle" id="btnMiniToggle">${miniLabel()}</button></div>`;
+  }
+  // 16차: 지역 탭이면 [이 지역 입구로 순간이동 · N원]
+  function mapTeleBtn() {
+    const t = bal.teleport.find((x) => x.id === cur.tab);
+    if (!t) return '';
+    const s = G.save, here = { ...s, player: { ...s.player, map: G.scene?.knight ? mapIdAt(G.scene.knight.x) : s.player.map } };
+    const cost = inv.mapTeleportCost(here, t.id, bal);
+    const fav = G.scene?.prefs?.fav === t.id;
+    return `<button type="button" class="act primary" data-act="maptele" data-id="${t.id}" ${s.player.gold >= cost && !cur.busy ? '' : 'disabled'}>${esc(t.name)}로 순간이동 · ${won(cost)}원</button>
+      <button type="button" class="act favbtn ${fav ? 'on' : ''}" data-act="fav" data-id="${t.id}" aria-pressed="${fav}">${fav ? '★ 즐겨찾기' : '☆ 즐겨찾기'}</button>`;
   }
   // 7차: 미니맵 보이기/숨기기(기기 설정 hwantasy.ui). 글자만 바꿔 지도 스크롤은 그대로
   function miniLabel() { return G.scene?.prefs?.mini === false ? '미니맵 보이기' : '미니맵 숨기기'; }
@@ -224,15 +271,17 @@ export function initWindows() {
 
   function grid(list, where, cap, s, { dimEquipped = false } = {}) {
     const cells = [];
+    if (cap === null) cap = list.length; // 13차: 종류 칩으로 거른 목록은 빈 칸 없이
     for (let i = 0; i < cap; i++) {
       const it = list[i];
       if (!it) { cells.push('<div class="cell empty"></div>'); continue; }
       const on = cur.sel && cur.sel.where === where && cur.sel.uid === it.uid;
       const eq = where === 'bag' && equipped(s, it.uid);
       cells.push(`<button type="button" class="cell ${on ? 'on' : ''} ${eq ? 'eq' : ''} ${eq && dimEquipped ? 'dim' : ''} ${rareCls(it.id)}" data-act="sel" data-where="${where}" data-uid="${it.uid}">
-        ${icon(it.id)}${it.count > 1 ? `<span class="n">${it.count}</span>` : ''}${it.enchant ? `<span class="e">+${it.enchant}</span>` : ''}${eq ? '<span class="eqm">E</span>' : cmpMark(s, it.id, it.enchant ?? 0)}</button>`);
+        ${icon(it.id)}${it.count > 1 ? `<span class="n">${it.count}</span>` : ''}${it.enchant ? `<span class="e">+${it.enchant}</span>` : ''}${eq ? '<span class="eqm">E</span>' : cmpMark(s, it.id, it.enchant ?? 0)}${it.lock ? '<span class="lockm" title="잠금">🔒</span>' : ''}</button>`);
     }
-    return `<div class="grid g${where}">${cells.join('')}</div>`;
+    if (!cells.length) cells.push('<p class="hint">이 종류의 물건이 없습니다.</p>');
+    return `<div class="grid g${where}" data-keep="grid-${where}">${cells.join('')}</div>`;
   }
 
   // 8차: 공격 = 무기 + 강화 + 피해 보너스(힘·장갑), 방어 = 레벨·체력 + 모든 방어구
@@ -265,9 +314,12 @@ export function initWindows() {
       if (d.hit) parts.push(`명중 +${d.hit}%`);
       if (d.dmg) parts.push(`피해 +${d.dmg}`);
       if (d.regen) parts.push(`회복 +${d.regen}`);
-      const setName = d.slot && d.slot !== 'armor' && d.tier ? bal.sets?.find((x) => x.tier === d.tier)?.name : null;
+      const setName = d.slot && d.slot !== 'armor' && !d.acc && d.tier ? bal.sets?.find((x) => x.tier === d.tier)?.name : null;
       return `${d.rare ? '<b class="rare-t">희귀</b> · ' : ''}${SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}${setName ? ` · <small>${setName} 세트</small>` : ''}`;
     }
+    if (d.elixir) return `${STAT_NAME[d.elixir]} 영구 +1 (최대 ${bal.elixirMax}개, 지금 ${(elixirOf(G.save) ?? {})[d.elixir] ?? 0}개)`;
+    if (d.dollBox) return `열면 마법인형 ${bal.dolls.length}종 중 하나(이미 있으면 ${won(bal.dollRefund)}원을 돌려받음)`;
+    if (d.card) return `<b class="grade g-${d.grade}">${bal.gradeNames[d.grade]}</b> 스킬 카드 — [정보]→[스킬]에서 ${esc(bal.skills.find((k) => k.id === d.card)?.name ?? '')} 레벨을 올리거나, ${bal.cardFuse}장을 합성해 다음 등급 카드로 바꿉니다`;
     if (d.heal) return `체력 +${d.heal}`;
     if (d.buff) { const b = buffDef(d.buff, bal); return `${b.desc} (또 쓰면 시간이 더해짐, 최대 ${Math.round((b.durationMs * bal.buffStackMax) / 60000)}분). 단축 칸에 두면 자동 사냥 때 효과가 끝나면 저절로 씀`; }
     if (d.id === 'huntScroll') return '어디서든 읽으면 고른 사냥터 입구로 갑니다(보스 방 제외)';
@@ -382,7 +434,7 @@ export function initWindows() {
       }
       rows.push(['강화', ench]);
       // ⑤ #6: 세트는 실제 계산(playerStats.sets)의 전후 — 부위 7칸만, 3·5·7개 단계 효과가 누적
-      const set = d.slot && d.slot !== 'armor' && d.tier ? bal.sets?.find((x) => x.tier === d.tier) : null;
+      const set = d.slot && d.slot !== 'armor' && !d.acc && d.tier ? bal.sets?.find((x) => x.tier === d.tier) : null;
       if (set) {
         const at = (st) => st.sets.find((x) => x.tier === set.tier) ?? { count: 0, stage: 0, fx: {} };
         const a = at(from), b2 = at(next);
@@ -402,6 +454,18 @@ export function initWindows() {
       <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
   }
 
+  // 13차 가방 종류 칩: 전체·장비·물약(회복·버프)·주문서(그 밖). 이번 실행 동안만 기억
+  const BAG_KINDS = [['all', '전체', () => true], ['gear', '장비', (d) => isGearDef(d)], ['potion', '물약', (d) => !!(d.heal || d.buff)], ['scroll', '주문서', (d) => !isGearDef(d) && !d.heal && !d.buff && !d.card], ['card', '카드', (d) => !!d.card]];
+  let bagKind = 'all';
+  function bagFilter(s) {
+    const k = BAG_KINDS.find((x) => x[0] === bagKind) ?? BAG_KINDS[0];
+    const list = k[0] === 'all' ? s.bag : s.bag.filter((i) => k[2](itemDef(i.id, bal)));
+    const chips = BAG_KINDS.map(([id, name, f]) => `<button type="button" class="chip ${bagKind === id ? 'on' : ''}" data-act="bagkind" data-k="${id}">${name} ${id === 'all' ? s.bag.length : s.bag.filter((i) => f(itemDef(i.id, bal))).length}</button>`).join('');
+    return { list, cap: k[0] === 'all' ? bal.inventory.bagSlots : null, bar: `<div class="chips bagchips">${chips}<button type="button" class="chip sortbtn" data-act="sortbag" data-where="bag" ${cur.busy ? 'disabled' : ''}>정리</button></div>` };
+  }
+  const lockBtn = (it) => (isGear(it.id) ? `<button type="button" class="act lockbtn" data-act="lock" data-uid="${it.uid}" data-on="${it.lock ? '0' : '1'}">${it.lock ? '🔓 잠금 풀기' : '🔒 잠그기'}</button>` : '');
+  const LOCK_HINT = '<p class="hint lockhint">🔒 잠긴 장비입니다 — 팔기·강화·도감 넣기가 안 됩니다. 가방에서 잠금을 풀 수 있습니다.</p>';
+
   // 가방
   function viewItems(s) {
     const it = selected(s);
@@ -410,14 +474,17 @@ export function initWindows() {
       const gear = isGear(it.id), eq = equipped(s, it.uid);
       side = `<div class="detail">${icon(it.id, 'big')}<h3>${nameHtml(it)}${it.count > 1 ? ` × ${won(it.count)}` : ''}</h3><p>${itemInfo(it)}</p>${equipped(s, it.uid) ? '' : cmpLine(s, it.id, it.enchant ?? 0)}
         <div class="btns">${gear ? (eq ? '<button type="button" class="act" data-act="unequip">벗기</button>' : '<button type="button" class="act primary" data-act="equip">장착</button>') : ''}
-        ${gear ? '<button type="button" class="act" data-act="goEnchant">강화</button>' : ''}
+        ${gear ? '<button type="button" class="act" data-act="goEnchant">강화</button>' : ''}${gear ? lockBtn(it) : ''}
         ${it.id === 'returnScroll' ? '<p class="hint">귀환은 오른쪽 아래 [귀환] 버튼으로 읽습니다.</p>' : ''}
         ${itemDef(it.id, bal).buff ? `<button type="button" class="act primary" data-act="usebuff" data-id="${it.id}">쓰기</button>` : ''}
         ${it.id === 'huntScroll' ? '<button type="button" class="act primary" data-act="hunt">읽기</button>' : ''}
         ${it.id === 'morphScroll' ? '<button type="button" class="act primary" data-act="toMorph">쓰기</button>' : ''}
+        ${itemDef(it.id, bal).elixir ? `<button type="button" class="act primary" data-act="elixir" data-id="${it.id}" ${((elixirOf(s) ?? {})[itemDef(it.id, bal).elixir] ?? 0) >= bal.elixirMax || cur.busy ? 'disabled' : ''}>마시기</button>` : ''}
+        ${it.id === 'dollBox' ? `<button type="button" class="act primary" data-act="dollbox" ${cur.busy ? 'disabled' : ''}>열기</button>` : ''}
         ${itemDef(it.id, bal).heal ? `<button type="button" class="act" data-act="drink" data-id="${it.id}">마시기</button><p class="hint">[물약] 버튼은 모자란 체력에 맞는 물약을 골라 마십니다.</p>` : ''}</div></div>`;
     }
-    return `${statsLine(s)}<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s)}<div class="side">${side}${it ? guideCard(s, it.id, it.enchant ?? 0, it.uid) : ''}</div></div>`;
+    const f = bagFilter(s);
+    return `${statsLine(s)}${f.bar}<div class="split">${grid(f.list, 'bag', f.cap, s)}<div class="side" data-keep="side">${side}${it?.lock ? LOCK_HINT : ''}${it ? guideCard(s, it.id, it.enchant ?? 0, it.uid) : ''}</div></div>`;
   }
 
   // 강화
@@ -435,7 +502,9 @@ export function initWindows() {
     cur.scrollKind = cur.scrollKind ?? 'normal';
     const kindChips = `<div class="chips sub">${[['normal', itemDef(scrollId, bal).name, scrolls], ['blessed', itemDef(bId, bal).name, inv.countItem(s, bId)], ['down', '강화 하락 주문서', inv.countItem(s, 'downScroll')]]
       .map(([k, n, c]) => `<button type="button" class="chip ${cur.scrollKind === k ? 'on' : ''}" data-act="skind" data-k="${k}">${esc(n.replace(' 주문서', ''))} ${won(c)}</button>`).join('')}</div>`;
-    const list = gear.map((g) => `<button type="button" class="row-item ${g.uid === it.uid ? 'on' : ''}" data-act="sel" data-where="bag" data-uid="${g.uid}">${icon(g.id)}<span>${esc(itemName(g))}</span>${equipped(s, g.uid) ? '<em>장착</em>' : ''}</button>`).join('');
+    const list = gear.map((g) => `<button type="button" class="row-item ${g.uid === it.uid ? 'on' : ''}" data-act="sel" data-where="bag" data-uid="${g.uid}">${icon(g.id)}<span>${g.lock ? '🔒 ' : ''}${esc(itemName(g))}</span>${equipped(s, g.uid) ? '<em>장착</em>' : ''}</button>`).join('');
+    // 13차: 잠긴 장비는 강화 버튼 대신 안내 + [잠금 풀기]
+    if (it.lock) return `<div class="split ench-split"><div class="list" data-keep="elist">${list}</div><div class="side">${fxBox}<div class="ench"><div class="ench-top">${icon(it.id, 'big')}<div><h3>${esc(itemName(it))}</h3></div></div>${LOCK_HINT}<div class="btns">${lockBtn(it)}</div></div></div></div>`;
     let center;
     if (info.next === null) center = `${fxBox}<p class="hint big">${esc(josa(itemName(it), '은/는'))} 최대 강화 단계입니다.</p>`;
     else {
@@ -455,7 +524,14 @@ export function initWindows() {
     }
     if (cur.scrollKind === 'blessed') center = blessedBox(s, it, info, bId, fxBox);
     else if (cur.scrollKind === 'down') center = downBox(s, it, fxBox);
-    return `<div class="split ench-split"><div class="list">${list}</div><div class="side">${kindChips}${center}</div></div>`;
+    return `<div class="split ench-split"><div class="list" data-keep="elist">${list}</div><div class="side">${kindChips}${center}${enchantLogBox()}</div></div>`;
+  }
+  // 17차 강화 기록(이 기기, 최근 20개)
+  function enchantLogBox() {
+    const log = loadEnchantLog();
+    if (!log.length) return '';
+    const rows = log.map((e) => `<li class="${e.ok ? 'ok' : 'bad'}"><span class="when">${agoText(e.t)}</span><b>${esc(e.name)}</b> <em>${esc(e.kind)}</em> +${e.from} → ${e.ok ? `<b class="ok-t">+${e.to}</b>` : `<b class="bad-t">+${e.to} 실패 · 사라짐</b>`}</li>`).join('');
+    return `<details class="elog" ${cur.logOpen ? 'open' : ''}><summary>최근 강화 ${log.length}개 <small>(이 폰에만 · 참고용)</small></summary><ul>${rows}</ul></details>`;
   }
   // 고급 강화: 도착 단계별 최종 확률 표(⑤ #7) + 사라질 수 있으면 확인 상자(그 장비·단계·배율에 묶음)
   function blessedBox(s, it, info, bId, fxBox) {
@@ -500,6 +576,7 @@ export function initWindows() {
     const ok = deal(res, 'enchant', { mustSave: true, after: () => {
       if (cur) { cur.busy = false; cur.fx = { kind: res.result === 'success' ? 'up' : 'broke', text }; if (res.result !== 'success') cur.sel = null; }
       hud.log(res.result === 'success' ? `<b style="color:#e0a63e">${name} 고급 강화: ${text}</b>` : `<span style="color:#ff8a7a">${name} 고급 강화: ${text}</span>`);
+      pushEnchantLog({ name, from: res.from, to: res.to, kind: '고급', ok: res.result === 'success' });
     } });
     if (!ok && !G.pending && cur) cur.busy = false;
   }
@@ -562,6 +639,7 @@ export function initWindows() {
       after: () => {
         if (cur) { cur.busy = false; cur.fx = { kind: res.stop === 'destroyed' ? 'broke' : 'up', text }; if (res.stop === 'destroyed') cur.sel = null; }
         hud.log(res.stop === 'destroyed' ? `<span style="color:#ff8a7a">${name} 한 번에 강화: ${text}</span>` : `<b style="color:#e0a63e">${name} 한 번에 강화: ${text}</b>`);
+        pushEnchantLog({ name, from, to: res.stop === 'destroyed' ? res.steps.at(-1).level : res.to, kind: '한 번에', ok: res.stop !== 'destroyed' });
       },
     });
     if (!ok && !G.pending && cur) cur.busy = false;
@@ -628,7 +706,20 @@ export function initWindows() {
       ${worn ? `<div class="wornrow">${icon(worn.id, 'big')}<div><b>${nameHtml(worn)}</b><p>${itemInfo(worn)}</p>
         <button type="button" class="act" data-act="unequipslot" data-slot="${cur.slot}">벗기</button></div></div>` : '<p class="hint">비어 있습니다.</p>'}
       <h4>가방 속 ${SLOT_NAMES[cur.slot]}</h4><div class="list">${list}</div></div>`;
-    return `${statsLine(s)}<div class="split"><div class="doll">${cells}${setBox(s)}</div><div class="side">${side}</div></div>`;
+    return `${statsLine(s)}${loadoutBar(s)}<div class="split"><div class="doll">${cells}${setBox(s)}</div><div class="side">${side}</div></div>`;
+  }
+  // 20차 장비 세트 3칸: [세트 이름 → 바꿔 끼기] [지금 장비 저장] [지우기]
+  function loadoutBar(s) {
+    const list = s.loadouts ?? [null, null, null];
+    const cells = list.map((l, i) => (cur.loEdit?.i === i
+      // ⑤ #1: 이름은 화면 안 입력칸으로(브라우저 입력 창에 기대지 않음)
+      ? `<div class="loadout editing"><input id="loName" type="text" maxlength="16" value="${esc(cur.loEdit.value)}" aria-label="${i + 1}번 세트 이름(8글자까지)" placeholder="세트 이름">
+        <button type="button" class="act primary" data-act="lookok" data-i="${i}">저장</button><button type="button" class="act" data-act="locancel">취소</button></div>`
+      : `<div class="loadout ${l ? '' : 'empty'}">
+      ${l ? `<button type="button" class="act primary" data-act="lowear" data-i="${i}" ${cur.busy ? 'disabled' : ''}>${esc(l.name)}</button>` : `<span class="sub-t">${i + 1}번 비어 있음</span>`}
+      <button type="button" class="act" data-act="losave" data-i="${i}" ${cur.busy ? 'disabled' : ''}>${l ? '덮어쓰기' : '지금 장비 저장'}</button>
+      ${l ? `<button type="button" class="act x" data-act="loclear" data-i="${i}" aria-label="${i + 1}번 세트 지우기">✕</button>` : ''}</div>`)).join('');
+    return `<div class="loadouts"><b>장비 세트</b>${cells}</div>`;
   }
   // 10차 세트 효과: 7부위(갑옷 큰 칸 제외) 같은 등급 3·5·7개
   const FX_TEXT = (fx) => [fx.hp && `체력 +${fx.hp}`, fx.def && `방어 +${fx.def}`, fx.dmg && `피해 +${fx.dmg}`, fx.crit && `치명 +${fx.crit}%`].filter(Boolean).join(' · ');
@@ -642,6 +733,7 @@ export function initWindows() {
   }
 
   // 능력치: 힘·민첩·체력 + 보너스 점수 나누기(확정 전 미리 보기) + 마을에서 다시 나누기
+  const STAT_NAME = { str: '힘', dex: '민첩', con: '체력' };
   const STAT_ROWS = [
     ['str', '힘', '피해가 올라 빨리 잡습니다 (추천)'],
     ['dex', '민첩', '명중과 공격 속도가 오릅니다'],
@@ -668,6 +760,7 @@ export function initWindows() {
           <p class="hint">확정하면 바꿀 수 없습니다(마을에서 돈을 내고 다시 나눌 수 있음).</p>` : ''}
         ${rows}
         <p class="sub-t fine-t">레벨이 오르면 힘·민첩·체력이 저절로 오르고, ${bal.stats.pointEvery}레벨마다 보너스 점수 1점(능력치 +${pv})을 받습니다.</p>
+        <p class="elixrow">엘릭서 ${['str', 'dex', 'con'].map((k) => `${STAT_NAME[k]} <b>${(elixirOf(s) ?? {})[k] ?? 0}/${bal.elixirMax}</b>`).join(' · ')} <small>(보스·성터에서 드물게, 가방에서 [마시기])</small></p>
       </div>
       <div class="derived"><h4>지금 능력${Object.keys(s.buffs ?? {}).length ? ' <small>(버프 포함)</small>' : ''}</h4>
         <p>공격 ${arrow(atkRange(now), atkRange(prev))}</p><p>명중 보너스 ${arrow(now.hitBonus, prev.hitBonus, '%')}</p>
@@ -781,6 +874,17 @@ export function initWindows() {
   const ITEM_SHORT = { potion: '초급 물약', potionMid: '중급 물약', potionHigh: '고급 물약', returnScroll: '귀환 주문서',
     powerPotion: '힘의 물약', hastePotion: '날쌘 물약', guardPotion: '수호 물약', expScroll: '경험치 두루마리', huntScroll: '사냥터 이동', morphScroll: '변신 주문서' };
   const slotIcon = (e) => (e.t === 'skill' ? `sk_${e.id}` : e.id);
+  // 14차: 다음 레벨에서 바뀌는 값(지금 → 다음)
+  function skillNextText(a, b) {
+    const sec = (ms) => `${(ms / 1000).toFixed(1).replace(/\.0$/, '')}초`, parts = [];
+    if (a.mult !== b.mult) parts.push(`피해 ×${a.mult} → <b class="gold-t">×${b.mult}</b>`);
+    if (a.blockPct !== b.blockPct) parts.push(`막기 ${a.blockPct}% → <b class="gold-t">${b.blockPct}%</b>`);
+    if (a.healPct !== b.healPct) parts.push(`회복 ${a.healPct}% → <b class="gold-t">${b.healPct}%</b>`);
+    if (a.reduce !== b.reduce) parts.push(`감소 ${Math.round(a.reduce * 100)}% → <b class="gold-t">${Math.round(b.reduce * 100)}%</b>`);
+    if (a.counterPct !== b.counterPct) parts.push(`되돌림 ${a.counterPct}% → <b class="gold-t">${b.counterPct}%</b>`);
+    parts.push(`쿨 ${sec(a.cooldownMs)} → <b class="gold-t">${sec(b.cooldownMs)}</b>`);
+    return `다음 레벨: ${parts.join(' · ')}`;
+  }
   const slotName = (e) => (e.t === 'skill' ? bal.skills.find((k) => k.id === e.id)?.name : ITEM_SHORT[e.id]) ?? e.id;
   function viewSkill(s) {
     const h = s.hotbar, lv = s.player.level, learned = new Set(learnedSkills(lv, bal));
@@ -798,21 +902,40 @@ export function initWindows() {
     const help = cur.pick ? `<b>${esc(slotName(cur.pick))}</b>을(를) 넣을 칸을 누르세요 <button type="button" class="act" data-act="hbcancel">그만두기</button>`
       : sel ? `${Math.floor(cur.hbSel / PAGE_SIZE) + 1}쪽 ${cur.hbSel % PAGE_SIZE + 1}번: <b>${esc(slotName(sel))}</b> <button type="button" class="act" data-act="hbclear">비우기</button>`
         : '아래에서 [칸에 넣기]를 누른 뒤 칸을 고르세요. 게임 화면의 [1/2]로 쪽을 넘깁니다(PC: 1~6, Tab).';
+    // 14차: 등급 칩·스킬 레벨(별)·[Lv 올리기]·다음 레벨 효과
+    const grade = (id) => bal.skillGrades[id];
     const card = (k) => {
-      const has = learned.has(k.id), auto = autoUse(h, k.id);
-      return `<div class="skcard ${has ? '' : 'locked'} ${k.kind} ${pickOn('skill', k.id) ? 'picked' : ''}">
+      const has = learned.has(k.id), auto = autoUse(h, k.id), slv = skillLevel(s, k.id), now = skillAt(k.id, slv, bal);
+      const cost = skillUpCost(slv, bal), next = cost ? skillAt(k.id, slv + 1, bal) : null, cid = cardIdOf(k.id), haveC = inv.countItem(s, cid);
+      const stars = `<span class="skstars" aria-label="스킬 레벨 ${slv}">${'★'.repeat(slv)}${'☆'.repeat(bal.skillUp.maxLv - slv)}</span>`;
+      const fx = next ? skillNextText(now, next) : '최고 레벨';
+      const canUp = has && cost && haveC >= cost.cards && s.player.gold >= cost.gold && !cur.busy;
+      const up = has ? (cost ? `<button type="button" class="act skup ${canUp ? 'primary' : ''}" data-act="skup" data-id="${k.id}" ${canUp ? '' : 'disabled'}>Lv ${slv + 1}로 · 카드 ${haveC}/${cost.cards} · ${won(cost.gold)}원</button>` : '<em class="ok-t">최고 레벨</em>') : '';
+      return `<div class="skcard ${has ? '' : 'locked'} ${k.kind} g-${grade(k.id)} ${pickOn('skill', k.id) ? 'picked' : ''}">
         <img class="ic" src="assets/icons/sk_${k.id}.png" alt="">
-        <div class="sktext"><b>${esc(k.name)}</b> <em>${KIND_NAME[k.kind]} · Lv ${k.level} · ${Math.round(k.cooldownMs / 1000)}초</em><p>${esc(k.desc)}</p></div>
+        <div class="sktext"><b>${esc(k.name)}</b> <span class="grade g-${grade(k.id)}">${bal.gradeNames[grade(k.id)]}</span> ${stars} <em>${KIND_NAME[k.kind]} · Lv ${k.level} · ${(now.cooldownMs / 1000).toFixed(1).replace(/\.0$/, '')}초</em><p>${esc(k.desc)}</p>
+          <p class="sknext">${has ? fx : ''}</p></div>
         ${has ? `<div class="skbtns"><button type="button" class="act primary" data-act="hbpick" data-t="skill" data-id="${k.id}">칸에 넣기</button>
-          <button type="button" class="act tog ${auto ? 'on' : ''}" data-act="hbauto" data-id="${k.id}" aria-pressed="${auto}">자동 ${auto ? '켜짐' : '꺼짐'}</button></div>`
+          <button type="button" class="act tog ${auto ? 'on' : ''}" data-act="hbauto" data-id="${k.id}" aria-pressed="${auto}">자동 ${auto ? '켜짐' : '꺼짐'}</button>${up}</div>`
           : `<em class="sub-t">Lv ${k.level}에 배움</em>`}
       </div>`;
     };
-    const skills = [...bal.skills].sort((a, b) => a.level - b.level).map(card).join('');
+    cur.skGrade = cur.skGrade ?? 'all';
+    const gchips = `<div class="chips skchips">${[['all', '전체'], ...bal.gradeOrder.map((g) => [g, bal.gradeNames[g]])].map(([g, n]) => `<button type="button" class="chip ${cur.skGrade === g ? 'on' : ''} ${g === 'all' ? '' : `g-${g}`}" data-act="skgrade" data-g="${g}">${n}</button>`).join('')}</div>`;
+    const skills = [...bal.skills].filter((k) => cur.skGrade === 'all' || grade(k.id) === cur.skGrade).sort((a, b) => a.level - b.level).map(card).join('');
+    // 카드 합성: 가진 카드마다 [N장 합성 → 다음 등급]
+    const owned = bal.skills.map((k) => ({ k, n: inv.countItem(s, cardIdOf(k.id)) })).filter((x) => x.n > 0);
+    const gi = (id) => bal.gradeOrder.indexOf(grade(id));
+    const fuse = owned.length ? owned.map(({ k, n }) => {
+      const top = gi(k.id) >= bal.gradeOrder.length - 1, nextG = top ? null : bal.gradeOrder[gi(k.id) + 1];
+      return `<div class="fuserow">${icon(cardIdOf(k.id))}<span>${esc(itemDef(cardIdOf(k.id), bal).name)} <b>×${won(n)}</b></span>
+        ${top ? '<em class="sub-t">가장 높은 등급</em>' : `<button type="button" class="act" data-act="fuse" data-id="${k.id}" ${n >= bal.cardFuse && !cur.busy ? '' : 'disabled'}>${bal.cardFuse}장 → <span class="grade g-${nextG}">${bal.gradeNames[nextG]}</span> 1장</button>`}</div>`;
+    }).join('') : '<p class="hint">아직 스킬 카드가 없습니다. 몬스터가 가끔 떨어뜨립니다(깊은 사냥터일수록 높은 등급, 보스는 희귀·영웅).</p>';
     const items = (bal.hotbarItems ?? []).map((id) => `<button type="button" class="act itempick ${pickOn('item', id) ? 'picked' : ''}" data-act="hbpick" data-t="item" data-id="${id}">${icon(id)}${ITEM_SHORT[id]}</button>`).join('');
     const passives = (bal.passives ?? []).map((p) => `<div class="pscard ${lv >= p.level ? 'on' : 'locked'}"><img class="ic" src="assets/icons/sk_${p.id}.png" alt=""><div><b>${esc(p.name)}</b> <em>${lv >= p.level ? '켜짐' : `Lv ${p.level}`}</em><p>${esc(p.desc)}</p></div></div>`).join('');
     return `<div class="hbbox">${slots}<p class="hbhelp">${help}</p></div>
-      <h4 class="skh">액티브 스킬 <small>자동 사냥은 '자동 켜짐'인 스킬만 씁니다(단축 칸에 없어도)</small></h4><div class="skgrid">${skills}</div>
+      <h4 class="skh">액티브 스킬 <small>자동 사냥은 '자동 켜짐'인 스킬만 씁니다(단축 칸에 없어도) · 스킬 카드와 돈으로 Lv 5까지</small></h4>${gchips}<div class="skgrid">${skills}</div>
+      <h4 class="skh">카드 합성 <small>같은 카드 ${bal.cardFuse}장 → 한 등급 위 카드 1장(그 등급 중 무작위)</small></h4><div class="fusebox">${fuse}</div>
       <h4 class="skh">물약·주문서 <small>버프 물약·두루마리를 칸에 두면 자동 사냥 때 효과가 끝나면 저절로 씁니다</small></h4><div class="itemrow">${items}</div>
       <h4 class="skh">패시브 <small>배우면 항상 켜짐</small></h4><div class="psgrid">${passives}</div>`;
   }
@@ -844,8 +967,8 @@ export function initWindows() {
       side = `<div class="detail">${icon(it.id, 'big')}<h3>${esc(itemName(it))}</h3><p>한 개 ${won(each)}원</p>
         ${it.count > 1 ? qtyBox(it.count) : ''}
         <p class="sum">${won(qty)}개 · <b>${won(each * qty)}원</b></p>
-        <div class="btns"><button type="button" class="act primary" data-act="sell" ${eq ? 'disabled' : ''}>팔기</button></div>
-        ${eq ? '<p class="hint">먼저 가방에서 벗어 주세요.</p>' : ''}</div>`;
+        <div class="btns"><button type="button" class="act primary" data-act="sell" ${eq || it.lock ? 'disabled' : ''}>팔기</button></div>
+        ${eq ? '<p class="hint">먼저 가방에서 벗어 주세요.</p>' : ''}${it.lock ? LOCK_HINT : ''}</div>`;
     }
     return `${junkBar(s)}${multiBar(s)}<div class="split">${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}<div class="side">${side}</div></div>`;
   }
@@ -892,12 +1015,46 @@ export function initWindows() {
         <p class="sub-t">새 기사가 처음부터 레벨 ${bal.progression.maxLevel}까지 자동 사냥하면</p>
         <p class="big-t">${hm(next)}</p>
         <p class="sub-t">${dirty ? `지금 배율로는 ${hm(now)}` : '지금 쓰는 배율입니다'}</p>
-        <p class="sub-t fine-t">100마리마다 마을에서 물약·장비를 사고 안전 강화하는 모의 사냥 기준</p>
+        <p class="sub-t fine-t">100마리마다 마을에서 물약·장비를 사고 안전 강화하는 모의 사냥 기준(장신구·마법인형·스킬 카드·엘릭서 없이)</p>
         <p class="sub-t">무기 +${w.safe + 1} 강화 성공 ${pct(cur.orig.enchant)}${d.enchant !== cur.orig.enchant ? ` → <b class="gold-t">${pct(d.enchant)}</b>` : ''}</p>
         <div class="btns"><button type="button" class="act primary" data-act="rapply" ${dirty && !cur.busy ? '' : 'disabled'}>적용</button>
           <button type="button" class="act" data-act="rreset" ${dirty ? '' : 'disabled'}>되돌리기</button></div>
         <p class="sub-t">언제든 다시 바꿀 수 있습니다. 바꾸면 다음 사냥부터 바로 적용됩니다.</p>
       </div></div>`;
+  }
+
+  // ---------- 19차 보스 코인 교환(잡화상) ----------
+  function viewCoin(s) {
+    const have = inv.countItem(s, 'bossCoin');
+    const rows = (bal.coinShop ?? []).map((l) => {
+      const d = itemDef(l.id, bal), can = have >= l.coins && !cur.busy;
+      return `<div class="row-item coinrow">${icon(l.id)}<span>${esc(d.name)}${d.grade ? ` <span class="grade g-${d.grade}">${bal.gradeNames[d.grade]}</span>` : ''}<br><small>${esc(itemInfo({ id: l.id, enchant: 0 }).replace(/<[^>]+>/g, ''))}</small></span>
+        <em>${icon('bossCoin', 'mini')} ${l.coins}</em><button type="button" class="act ${can ? 'primary' : ''}" data-act="coinbuy" data-id="${l.id}" ${can ? '' : 'disabled'}>바꾸기</button></div>`;
+    }).join('');
+    return `<div class="coinhead">${icon('bossCoin')}<b>보스 코인 ${won(have)}개</b><span class="sub-t">폐광의 큰울림 2개 · 망령 기사왕 4개를 반드시 떨어뜨립니다</span></div><div class="list coinlist" data-keep="coin">${rows}</div>`;
+  }
+
+  // ---------- 13차 자동 보충(잡화상) ----------
+  // 줄마다 목표 개수(◀ ▶, bal.restockSteps). 바꾸면 바로 저장. 아래: 지금 마을에 오면 살 것·합계 + [지금 채우기]
+  function viewRestock(s) {
+    const steps = bal.restockSteps, map = s.restock ?? {};
+    const rows = bal.restockItems.map((id) => {
+      const d = itemDef(id, bal), t = map[id] ?? 0, have = inv.countItem(s, id);
+      return `<div class="rsrow ${t ? 'on' : ''}">${icon(id)}<span class="rsname">${esc(d.name)}<small>가방 ${won(have)}개 · ${won(d.price)}원</small></span>
+        <button type="button" class="rbtn" data-act="rsstep" data-id="${id}" data-d="-1" ${t <= 0 || cur.busy ? 'disabled' : ''} aria-label="${esc(d.name)} 목표 줄이기">◀</button>
+        <b class="rsval">${t ? `${won(t)}개` : '안 삼'}</b>
+        <button type="button" class="rbtn" data-act="rsstep" data-id="${id}" data-d="1" ${t >= steps.at(-1) || cur.busy ? 'disabled' : ''} aria-label="${esc(d.name)} 목표 늘리기">▶</button></div>`;
+    }).join('');
+    const plan = inv.restockPlan(s, bal);
+    const buy = plan.bought.map((l) => `<span class="rwitem">${icon(l.id)}${esc(itemDef(l.id, bal).name)} ×${won(l.count)}</span>`).join('');
+    const shortTxt = plan.lines.filter((l) => l.short).map((l) => `${itemDef(l.id, bal).name}(${l.short === 'gold' ? '돈' : '가방'} 모자람)`).join(', ');
+    const preview = !Object.keys(map).length ? '<p class="hint">목표를 정한 물건이 없습니다. ▶를 눌러 목표 개수를 정하세요.</p>'
+      : plan.bought.length ? `<div class="rsbuy">${buy}</div><p class="sum">합계 <b class="gold-t">${won(plan.cost)}원</b>${shortTxt ? ` · <span class="bad-t">${esc(shortTxt)}</span>` : ''}</p>`
+        : `<p class="hint">${plan.reason === 'nothing' ? '모두 목표만큼 있습니다.' : plan.reason === 'gold' ? '돈이 모자라 살 수 없습니다.' : '가방에 자리가 없습니다.'}</p>`;
+    return `<p class="sub-t">목표 개수를 정해 두면 <b>마을에 들어올 때마다</b>(귀환·쓰러짐·걸어서) 모자란 만큼 저절로 삽니다. 돈이 모자라면 위에 있는 것부터 삽니다. 창고에 있는 것은 세지 않습니다.</p>
+      <div class="rsgrid" data-keep="rs">${rows}</div>
+      <div class="rsnow"><h4>지금 채우면</h4>${preview}
+        <div class="btns"><button type="button" class="act primary" data-act="rsnow" ${plan.bought.length && !cur.busy ? '' : 'disabled'}>지금 채우기</button></div></div>`;
   }
 
   // 창고
@@ -910,8 +1067,9 @@ export function initWindows() {
         <button type="button" class="act primary" data-act="${fromBag ? 'deposit' : 'withdraw'}" ${eq ? 'disabled' : ''}>${fromBag ? '맡기기 →' : '← 찾기'}</button>
         ${eq ? '<span class="hint">장착 중인 장비는 먼저 벗어 주세요</span>' : ''}</div>`;
     }
-    return `<div class="bank"><div><h4>가방 ${s.bag.length}/${bal.inventory.bagSlots}</h4>${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}</div>
-      <div><h4>창고 ${s.warehouse.length}/${bal.inventory.warehouseSlots}</h4>${grid(s.warehouse, 'warehouse', bal.inventory.warehouseSlots, s)}</div></div>${ctl}`;
+    const sortBtn = (w) => `<button type="button" class="chip sortbtn" data-act="sortbag" data-where="${w}" ${cur.busy ? 'disabled' : ''}>정리</button>`;
+    return `<div class="bank"><div><h4>가방 ${s.bag.length}/${bal.inventory.bagSlots} ${sortBtn('bag')}</h4>${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}</div>
+      <div><h4>창고 ${s.warehouse.length}/${bal.inventory.warehouseSlots} ${sortBtn('warehouse')}</h4>${grid(s.warehouse, 'warehouse', bal.inventory.warehouseSlots, s)}</div></div>${ctl}`;
   }
 
   // 11차 변신 목록: 레벨 잠금, 지금 변신·남은 시간·덤 능력치, [변신](주문서 1장) / [변신 풀기]
@@ -941,6 +1099,32 @@ export function initWindows() {
     if (!ok && !G.pending && cur) cur.busy = false;
   }
 
+  // ---------- 15차 경험치 복구(순간이동 마법사) ----------
+  function viewRecover(s) {
+    const q = inv.recoverQuote(s, bal), lost = q.used;
+    if (q.max) return '<p class="hint big">최대 레벨이라 되찾을 경험치가 없습니다.</p>';
+    if (!lost) return '<p class="hint big">되찾을 경험치가 없습니다.</p><p class="hint" style="text-align:center">쓰러지면 잃은 경험치를 여기서 돈을 내고 되찾을 수 있습니다(가장 최근 한 번).</p>';
+    const cost = q.cost, need = s.player.level < bal.progression.maxLevel ? needExp(s.player.level, bal) : 0;
+    return `<div class="recover"><p>"쓰러졌을 때 흩어진 경험을 모아 드리지요."</p>
+      <p>되찾을 경험치 <b class="gold-t">${won(lost)}</b>${q.used < q.lost ? ` <small>(잃은 ${won(q.lost)} 중 최대 레벨까지)</small>` : ''}${need ? ` <small>(지금 레벨의 ${((100 * lost) / need).toFixed(2)}%)</small>` : ''}</p>
+      <p>비용 <b class="${s.player.gold >= cost ? 'gold-t' : 'bad-t'}">${won(cost)}원</b></p>
+      <div class="btns"><button type="button" class="act primary" data-act="recover" ${s.player.gold >= cost && !cur.busy ? '' : 'disabled'}>경험치 되찾기</button></div>
+      ${s.player.gold < cost ? '<p class="hint">돈이 부족합니다.</p>' : ''}<p class="sub-t">다시 쓰러지면 그때 잃은 양으로 바뀝니다.</p></div>`;
+  }
+  // ---------- 15차 마법인형 ----------
+  function viewDoll(s) {
+    const owned = s.dolls?.owned ?? [], curD = s.dolls?.cur ?? null, boxes = inv.countItem(s, 'dollBox');
+    const rows = bal.dolls.map((d) => {
+      const has = owned.includes(d.id), on = curD === d.id;
+      return `<div class="dollrow ${has ? '' : 'locked'} ${on ? 'on' : ''}"><span class="dolldot" style="background:#${d.color.toString(16).padStart(6, '0')}"></span>
+        <span><b>${esc(d.name)}</b><br><small>${esc(d.desc)}</small></span>
+        ${has ? (on ? `<button type="button" class="act" data-act="dollset" data-id="" ${cur.busy ? 'disabled' : ''}>두고 다니기</button>` : `<button type="button" class="act primary" data-act="dollset" data-id="${d.id}" ${cur.busy ? 'disabled' : ''}>데리고 다니기</button>`) : '<em class="sub-t">아직 없음</em>'}</div>`;
+    }).join('');
+    return `<p class="sub-t">마법인형은 하나만 데리고 다니며, 기사 옆을 빛 정령으로 따라다닙니다. 잡화상 「마법인형 상자」(${won(itemDef('dollBox', bal).price)}원)나 보스에게서 얻습니다.</p>
+      <div class="dollgrid">${rows}</div>
+      ${boxes ? `<div class="btns"><button type="button" class="act primary" data-act="dollbox" ${cur.busy ? 'disabled' : ''}>상자 열기 (${won(boxes)}개)</button></div>` : ''}`;
+  }
+
   // 순간이동
   function viewTele(s) {
     const rows = bal.teleport.map((t) => {
@@ -967,11 +1151,17 @@ export function initWindows() {
     render();
   });
   $('winClose').addEventListener('click', close);
+  // 20차 ⑦ #1: 세트 이름 입력 중 다시 그려도 쓰던 글자를 지킴
+  $('winBody').addEventListener('input', (e) => { if (cur?.loEdit && e.target.id === 'loName') cur.loEdit.value = e.target.value; });
+  // 17차: 강화 기록 펼침 상태를 다시 그려도 지킴
+  $('winBody').addEventListener('toggle', (e) => { if (cur && e.target.classList?.contains('elog')) cur.logOpen = e.target.open; }, true);
   // 창 위의 손가락이 게임(조이스틱)으로 새지 않게
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove']) $('win').addEventListener(t, (e) => e.stopPropagation());
 
+  const NEEDS_SEL = new Set(['equip', 'unequip', 'sell', 'deposit', 'withdraw', 'askEnchant', 'downGo', 'batchSafe', 'batchAsk', 'batchGo', 'doEnchant', 'blessAsk', 'blessGo']);
   function act(a, d) {
     const s = G.save;
+    if (NEEDS_SEL.has(a) && !selected(s)) { cur.confirm = null; cur.bconfirm = null; cur.bless = null; msg('고른 물건이 바뀌었습니다. 다시 골라 주세요', true); render(); return; }
     switch (a) {
       case 'sel':
         cur.sel = { where: d.where, uid: Number(d.uid) }; cur.qty = 1; cur.qtyFresh = true; cur.confirm = null; cur.fx = null; msg(''); break;
@@ -982,12 +1172,51 @@ export function initWindows() {
       case 'qtyadd': cur.qty = Math.max(1, (cur.qtyFresh ? 0 : cur.qty) + Number(d.v)); cur.qtyFresh = false; break;
       case 'qtyone': cur.qty = 1; cur.qtyFresh = true; break;
       case 'minitoggle': toggleMini(); return; // 다시 그리지 않음(스크롤 유지)
+      case 'fav': {
+        const sc = G.scene;
+        if (!sc?.prefs) return;
+        sc.prefs.fav = sc.prefs.fav === d.id ? null : d.id;
+        savePrefs(sc.prefs);
+        msg(sc.prefs.fav ? '즐겨찾기로 정했습니다 — 메뉴에서 바로 갈 수 있습니다' : '즐겨찾기를 지웠습니다');
+        break;
+      }
+      case 'maptele': {
+        if (cur.busy) return;
+        const why = G.scene?.huntScrollBlock({ ignorePause: true, noScroll: true });
+        if (why) { msg(why, true); return; }
+        const t = bal.teleport.find((x) => x.id === d.id);
+        const here = { ...s, player: { ...s.player, ...G.scene.positionOf() } };
+        const res = inv.mapTeleport(here, d.id, bal);
+        if (!res.ok) { msg(res.reason, true); return; }
+        cur.busy = true;
+        const ok = deal(res, 'teleport', { keepPosition: true, after: () => { if (cur) cur.busy = false; close(); G.scene.applyTeleport(t.name); hud.toast(`${t.name}로 순간이동 (−${won(res.cost)}원)`, 2200); } });
+        if (!ok && cur) cur.busy = false;
+        return;
+      }
       case 'equip': deal(inv.equip(s, cur.sel.uid, bal), 'equip', { okText: '장착했습니다' }); return;
       case 'unequip': deal(inv.unequip(s, slotOf(itemDef(selected(s).id, bal)), bal), 'unequip', { okText: '벗었습니다' }); return;
       // 8차
       case 'slotf': cur.slot = d.slot; cur.buyId = null; cur.qty = 1; cur.qtyFresh = true; msg(''); break;
       case 'slot': cur.slot = d.slot; msg(''); break;
       case 'equipuid': deal(inv.equip(s, Number(d.uid), bal), 'equip', { okText: '장착했습니다' }); return;
+      // 20차 장비 세트
+      case 'losave': { const i = Number(d.i); cur.loEdit = { i, value: s.loadouts?.[i]?.name ?? ['사냥', '보스', '세트3'][i] }; msg(''); break; }
+      case 'locancel': cur.loEdit = null; msg(''); break;
+      case 'lookok': {
+        const i = Number(d.i), raw = $('loName')?.value ?? '', name = raw.trim();
+        if (!name || [...name].length > 8) { cur.loEdit = { i, value: raw }; render(); msg('세트 이름은 1~8글자로 적어 주세요', true); return; } // ⑤ #3: 자르지 않고 알림
+        cur.loEdit = null;
+        deal(inv.saveLoadout(s, i, name, bal), 'loadout', { okText: `「${name}」 세트에 지금 장비를 저장했습니다` });
+        return;
+      }
+      case 'lowear': {
+        const i = Number(d.i), name = s.loadouts?.[i]?.name ?? '';
+        const res = inv.applyLoadout(s, i, bal);
+        if (!res.ok) { msg(res.reason, true); return; }
+        deal(res, 'loadout', { okText: `「${name}」 세트로 바꿔 꼈습니다${res.missing ? ` (없어진 장비 ${res.missing}칸은 그대로)` : ''}` });
+        return;
+      }
+      case 'loclear': deal(inv.clearLoadout(s, Number(d.i), bal), 'loadout', { okText: '세트를 지웠습니다' }); return;
       case 'unequipslot': deal(inv.unequip(s, d.slot, bal), 'unequip', { okText: '벗었습니다' }); return;
       // ⑦: [물약] 버튼과 같은 대기시간(창이 열려 게임 시계가 멈춰 있어도 연달아 못 마심)
       case 'wtype': cur.wtype = d.type; cur.buyId = null; msg(''); break;
@@ -999,7 +1228,7 @@ export function initWindows() {
       case 'hunt': {
         const why = G.scene?.huntScrollBlock({ ignorePause: true });
         if (why) { msg(why, true); return; }
-        cur = { ...cur, kind: 'tele', tab: 'tele', scroll: true, sel: null }; msg(''); break;
+        cur = { ...cur, kind: 'tele', tab: 'tele', scroll: true, sel: null }; unhalf(); msg(''); break;
       }
       case 'drink': {
         if ((G.scene?.potionCd ?? 0) > 0) { msg('물약을 마신 지 얼마 안 됐습니다. 창을 닫고 잠시 뒤에 다시 마셔 주세요', true); return; }
@@ -1063,6 +1292,70 @@ export function initWindows() {
       // 9차 단축 칸
       case 'hbpick': cur.pick = { t: d.t, id: d.id }; cur.hbSel = null; msg(''); break;
       case 'hbcancel': cur.pick = null; msg(''); break;
+      // 15차 캐릭터 성장
+      case 'elixir': {
+        if (cur.busy) return;
+        const def = itemDef(d.id, bal);
+        deal(inv.drinkElixir(s, d.id, bal), 'elixir', { okText: `${def.name}을 마셨습니다 — ${STAT_NAME[def.elixir]} 영구 +1`, after: () => { G.scene?.refreshHud(true); hud.log(`<b style="color:#e0a63e">${def.name}</b> · ${STAT_NAME[def.elixir]} 영구 +1`); } });
+        return;
+      }
+      case 'dollbox': {
+        if (cur.busy) return;
+        if (G.pending || G.lockedByOtherTab) { msg('지금은 열 수 없습니다', true); return; }
+        const res = inv.openDollBox(s, G.scene.rng, bal);
+        if (!res.ok) { msg(res.reason, true); return; }
+        cur.busy = true;
+        const dd = dollDef(res.doll, bal);
+        const text = res.dup ? `${dd.name} — 이미 있어 ${won(bal.dollRefund)}원을 돌려받았습니다` : `${dd.name}을(를) 얻었습니다! (${dd.desc})`;
+        const ok = deal(res, 'dollBox', { mustSave: true, okText: text, after: () => { if (cur) cur.busy = false; hud.log(`마법인형 상자 · ${esc(text)}`); G.scene?.refreshHud(true); } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      case 'dollset': {
+        if (cur.busy) return;
+        const id = d.id || null;
+        deal(inv.setDoll(s, id, bal), 'doll', { okText: id ? `${dollDef(id, bal).name}을(를) 데리고 다닙니다` : '인형을 두고 다닙니다', after: () => G.scene?.refreshHud(true) });
+        return;
+      }
+      case 'recover': {
+        if (cur.busy) return;
+        const res = inv.recoverExp(s, bal);
+        if (!res.ok) { msg(res.reason, true); return; }
+        cur.busy = true;
+        const ok = deal(res, 'recover', { okText: `경험치 ${won(res.exp)}을 되찾았습니다 (−${won(res.cost)}원)`, after: () => {
+          if (cur) cur.busy = false;
+          hud.log(`경험치 복구 · +${won(res.exp)} (−${won(res.cost)}원)`);
+          if (res.levelsGained > 0) { G.scene?.levelUpFx(G.save.player.level); G.persist('levelup'); }
+          G.scene?.refreshHud(true);
+        } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      // 14차 스킬 성장
+      case 'skgrade': cur.skGrade = d.g; msg(''); break;
+      case 'skup': {
+        if (cur.busy) return;
+        const name = bal.skills.find((k) => k.id === d.id)?.name ?? d.id;
+        const res = inv.levelUpSkill(s, d.id, bal);
+        if (!res.ok) { msg(res.reason, true); return; }
+        cur.busy = true;
+        const ok = deal(res, 'skillUp', { okText: `${name} Lv ${res.to}!`, after: () => { if (cur) cur.busy = false; hud.log(`<b style="color:#e0a63e">${esc(name)} Lv ${res.to}</b> — 카드 ${res.cost.cards}장 · ${won(res.cost.gold)}원`); G.scene?.refreshSkills(true); } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
+      case 'fuse': {
+        if (cur.busy) return;
+        if (G.pending || G.lockedByOtherTab) { msg('지금은 합성할 수 없습니다', true); return; }
+        const from = itemDef(cardIdOf(d.id), bal).name;
+        const res = inv.fuseCards(s, d.id, G.scene.rng, bal);
+        if (!res.ok) { msg(res.reason, true); return; }
+        cur.busy = true;
+        const got = itemDef(res.gotId, bal);
+        // 무작위 결과는 저장 실패 때도 같은 결과로만 다시 시도(mustSave)
+        const ok = deal(res, 'fuse', { mustSave: true, okText: `${from} ${bal.cardFuse}장 → ${got.name}!`, after: () => { if (cur) cur.busy = false; hud.log(`카드 합성 · ${esc(from)} ${bal.cardFuse}장 → <b class="grade g-${got.grade}">${esc(got.name)}</b>`); } });
+        if (!ok && !G.pending && cur) { cur.busy = false; render(); }
+        return;
+      }
       case 'hbslot': {
         const i = Number(d.i);
         if (!(i >= 0 && i < HOTBAR_SLOTS)) return;
@@ -1088,6 +1381,36 @@ export function initWindows() {
         return;
       }
       case 'goEnchant': cur.tab = 'enchant'; cur.confirm = null; cur.fx = null; break;
+      // 13차
+      case 'bagkind': bagKind = d.k; msg(''); break;
+      case 'sortbag': {
+        if (cur.busy) return;
+        const res = inv.sortItems(s, d.where, bal);
+        if (!res.ok) { msg(res.reason); return; }
+        deal(res, 'sort', { okText: d.where === 'bag' ? '가방을 정리했습니다' : '창고를 정리했습니다' });
+        return;
+      }
+      case 'lock': {
+        const on = d.on === '1';
+        deal(inv.setLock(s, Number(d.uid), on, bal), 'lock', { okText: on ? '잠갔습니다 — 팔기·강화·도감 넣기가 안 됩니다' : '잠금을 풀었습니다' });
+        return;
+      }
+      case 'rsstep': {
+        if (cur.busy) return;
+        // ⑦ #1: 단계 밖 값(가져온 기록 등)이면 바로 아래·위 단계로
+        const steps = bal.restockSteps, t = s.restock?.[d.id] ?? 0;
+        const nextT = Number(d.d) > 0 ? steps.find((v) => v > t) : [...steps].reverse().find((v) => v < t);
+        if (nextT === undefined) return;
+        deal(inv.setRestock(s, d.id, nextT, bal), 'restockSet', { okText: '' });
+        return;
+      }
+      case 'coinbuy': {
+        if (cur.busy) return;
+        const name = itemDef(d.id, bal).name;
+        deal(inv.coinBuy(s, d.id, 1, bal), 'coinBuy', { okText: `${name}(으)로 바꿨습니다`, after: () => { hud.log(`보스 코인 교환 · ${esc(name)}`); G.scene?.refreshHud(true); } });
+        return;
+      }
+      case 'rsnow': { if (cur.busy) return; G.scene?.tryRestock(true); return; }
       case 'buy': {
         const id = cur.buyId, d2 = itemDef(id, bal);
         const n = d2.kind === 'consumable' ? Math.min(cur.qty, inv.maxBuy(s, id, bal)) : 1;
@@ -1121,11 +1444,11 @@ export function initWindows() {
         const res = lowerEnchant(s, it.uid, bal);
         if (!res.ok) { msg(res.reason, true); return; }
         const name = itemDef(it.id, bal).name;
-        deal(res, 'enchant', { okText: `${name} +${res.from} → +${res.to}`, after: () => { if (cur) cur.fx = { kind: 'up', text: `+${res.from} → +${res.to} 낮췄습니다` }; } });
+        deal(res, 'enchant', { okText: `${name} +${res.from} → +${res.to}`, after: () => { pushEnchantLog({ name, from: res.from, to: res.to, kind: '하락', ok: true }); if (cur) cur.fx = { kind: 'up', text: `+${res.from} → +${res.to} 낮췄습니다` }; } });
         return;
       }
       case 'morphGo': doMorph(d.id); return;
-      case 'toMorph': cur = { ...cur, kind: 'morph', tab: 'morph', sel: null }; msg(''); break;
+      case 'toMorph': cur = { ...cur, kind: 'morph', tab: 'morph', sel: null }; unhalf(); msg(''); break;
       case 'unmorph': {
         if (cur.busy) return;
         deal({ ok: true, save: unmorph(s) }, 'morph', { okText: '변신을 풀었습니다', after: () => { if (G.scene) G.scene.morphLook(true); } });
@@ -1154,6 +1477,7 @@ export function initWindows() {
         const uid = Number(d.uid), it = s.bag.find((i) => i.uid === uid);
         if (!it) return;
         if (equipped(s, uid)) { msg('끼고 있는 장비는 팔 수 없습니다', true); return; }
+        if (it.lock) { msg('잠긴 장비는 팔 수 없습니다', true); return; }
         if (cur.multi.has(uid)) cur.multi.delete(uid); else cur.multi.set(uid, it.count);
         msg(''); break;
       }
@@ -1206,6 +1530,7 @@ export function initWindows() {
       mustSave: true,
       after: () => {
         cur && (cur.busy = false);
+        pushEnchantLog({ name, from, to: from + 1, kind: '일반', ok: res.result === 'success' });
         if (res.result === 'success') { if (cur) cur.fx = { kind: 'up', text: `+${from + 1} 성공!` }; hud.log(`<b style="color:#e0a63e">${name} +${from + 1} 강화 성공</b>`); }
         else { if (cur) { cur.fx = { kind: 'broke', text: `${josa(name, '이/가')} 사라졌습니다` }; cur.sel = null; } hud.log(`<span style="color:#ff8a7a">${name} +${from} 강화 실패 — 장비가 사라졌습니다</span>`); }
       },
@@ -1269,5 +1594,12 @@ export function initWindows() {
   // 저장 실패 → [그만두기]로 거래를 취소하면 창의 '처리 중'을 풀고 다시 그린다(취소 뒤 저장이 또 실패해도 창이 잠기지 않게)
   function unbusy() { if (!cur) return; cur.busy = false; cur.junk = null; cur.confirmReset = false; render(); }
 
-  return { open, close, unbusy, refresh: render, get isOpen() { return !!cur; } };
+  // 17차: 메뉴 [★ 즐겨찾기로] — 지도 그 지역 탭을 열고 순간이동 버튼과 같은 거래
+  function goFav(id) { open('map', { tab: id }); act('maptele', { id }); }
+  // ⑤ #3: 메뉴 버튼에 미리 값 표시(지금 위치 기준)
+  function favCost(id) {
+    const s = G.save, here = { ...s, player: { ...s.player, map: G.scene?.knight ? mapIdAt(G.scene.knight.x) : s.player.map } };
+    return inv.mapTeleportCost(here, id, bal);
+  }
+  return { open, close, unbusy, refresh: render, goFav, favCost, get isOpen() { return !!cur; } };
 }

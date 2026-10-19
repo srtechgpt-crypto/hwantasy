@@ -58,6 +58,15 @@ const parts = PARTS.flatMap(([slot, noun, tiers, fx]) => tiers.map((pre, t) => (
 })));
 const partIds = t => PARTS.map(([slot]) => `${slot}${t}`);
 armors.push(...parts);
+// 18차 장신구(목걸이·반지): 대장장이에서만(드랍 없음), 세트에 안 셈(acc), 강화는 부위 규칙(갑옷 주문서, 안전 +2), 1단계마다 방어 +1 [가정]
+const ACCS = [
+  ['neck', '목걸이', ['가죽끈', '은', '금', '미스릴'], t => ({ hp: [20, 40, 70, 110][t], regen: [0, 1, 1, 2][t] })],
+  ['ring', '반지', ['구리', '은', '금', '미스릴'], t => ({ dmg: [1, 2, 3, 5][t], hit: [1, 2, 4, 6][t] })],
+];
+const ACC_PRICE = [400, 2000, 9000, 60000];
+armors.push(...ACCS.flatMap(([slot, noun, tiers, fx]) => tiers.map((pre, t) => ({
+  id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, acc: true, tier: t + 1, def: 0, ...fx(t), price: ACC_PRICE[t], shop: true, sellRate: 0.25, p18: true,
+}))));
 const consumables = [
   { id: 'potion', name: '초급 회복 물약', kind: 'consumable', price: 10, heal: 30, cooldownMs: 1000, shop: true, sellRate: 0.25 },
   { id: 'potionMid', name: '중급 회복 물약', kind: 'consumable', price: 40, heal: 90, cooldownMs: 1000, shop: true, sellRate: 0.25 },
@@ -77,6 +86,26 @@ const consumables = [
   { id: 'downScroll', name: '강화 하락 주문서', kind: 'consumable', price: 60, shop: true, sellRate: 0.25 },
   { id: 'morphScroll', name: '변신 주문서', kind: 'consumable', price: 300, shop: true, sellRate: 0.25 },
 ];
+// 14차 스킬 카드: 액티브 스킬마다 1종(card_<스킬id>). 등급(일반·고급·희귀·영웅)으로 값·드랍 지역이 다르다. 상점 없음 [가정]
+export const SKILL_GRADES = { bash: 'common', block: 'common', dash: 'common', stun: 'uncommon', quake: 'uncommon', heal: 'uncommon', whirl: 'rare', guard: 'rare', counter: 'rare', ult: 'hero' };
+export const GRADE_ORDER = ['common', 'uncommon', 'rare', 'hero'];
+const CARD_NAMES = { bash: '강타', block: '방패 막기', dash: '돌진 베기', stun: '쇼크 스턴', quake: '대지 가르기', heal: '굳센 의지', whirl: '회오리 베기', guard: '리덕션 아머', counter: '반격의 기운', ult: '성검 강림' };
+const CARD_PRICE = { common: 100, uncommon: 240, rare: 600, hero: 1600 };
+consumables.push(...Object.entries(SKILL_GRADES).map(([skill, grade]) => ({ id: `card_${skill}`, name: `${CARD_NAMES[skill]} 카드`, kind: 'consumable', price: CARD_PRICE[grade], shop: false, sellRate: 0.25, card: skill, grade })));
+const cardsOf = (...grades) => Object.keys(SKILL_GRADES).filter(s => grades.includes(SKILL_GRADES[s])).map(s => `card_${s}`);
+// 15차 엘릭서(능력치 영구 +1, 능력치마다 최대 elixirMax)·마법인형 상자. p15 = 15차 아이템(옛 버전 기록에는 없음) [가정]
+consumables.push(
+  { id: 'elixirStr', name: '힘의 엘릭서', kind: 'consumable', price: 2000, shop: false, sellRate: 0.25, elixir: 'str', p15: true },
+  { id: 'elixirDex', name: '민첩의 엘릭서', kind: 'consumable', price: 2000, shop: false, sellRate: 0.25, elixir: 'dex', p15: true },
+  { id: 'elixirCon', name: '체력의 엘릭서', kind: 'consumable', price: 2000, shop: false, sellRate: 0.25, elixir: 'con', p15: true },
+  { id: 'dollBox', name: '마법인형 상자', kind: 'consumable', price: 3000, shop: true, sellRate: 0.25, dollBox: true, p15: true },
+);
+const ELIXIRS = ['elixirStr', 'elixirDex', 'elixirCon'];
+// 19차 보스 코인: 보스가 반드시 떨어뜨림(큰울림 2·기사왕 4), 잡화상 [보스 코인] 탭에서 특별 물건과 바꿈 [가정]
+consumables.push({ id: 'bossCoin', name: '보스 코인', kind: 'consumable', price: 1000, shop: false, sellRate: 0.25, p19: true });
+// 지역 단계별 카드 목록(14차 ⑤ #6: 깊은 지역도 낮은 등급이 나오게 누적 — 들판 일반 / 숲 +고급 / 폐광 +희귀 / 성터 +영웅), 보스는 희귀·영웅
+const CARD_POOLS = [cardsOf('common'), cardsOf('common', 'uncommon'), cardsOf('common', 'uncommon', 'rare'), cardsOf('common', 'uncommon', 'rare', 'hero')];
+const BOSS_CARDS = cardsOf('rare', 'hero');
 // 10차 희귀 장비: 등급(1~4) 있는 무기·큰 갑옷·부위의 '빛나는' 판(별도 id `<원래>_r`, 상점 없음, 값 2배 — ⑤ #20 판매 돈이 너무 크지 않게).
 // 무기 최소·최대 ×1.25 올림, 방어구는 0 아닌 수치 ×1.5 올림 + 최대 체력 +5×등급. 강화 규칙·부위·세트 등급은 원래와 같다
 const RARE_FIELDS = ['def', 'hit', 'dmg', 'regen'];
@@ -85,7 +114,7 @@ const rareOf = d => (d.kind === 'weapon'
   : { ...d, id: `${d.id}_r`, name: `빛나는 ${d.name}`, rare: true, base: d.id, shop: false, price: d.price * 2,
     ...Object.fromEntries(RARE_FIELDS.filter(f => d[f]).map(f => [f, Math.ceil(d[f] * 1.5)])), hp: Math.ceil((d.hp ?? 0) * 1.5) + 5 * d.tier });
 const rareWeapons = weapons.filter(d => d.tier).map(rareOf);
-const rareArmors = armors.filter(d => d.tier).map(rareOf);
+const rareArmors = armors.filter(d => d.tier && !d.acc).map(rareOf); // 18차: 장신구는 희귀판 없음
 weapons.push(...rareWeapons);
 armors.push(...rareArmors);
 export const RARE_POOLS = [1, 2, 3, 4].map(t => [...rareWeapons, ...rareArmors].filter(d => d.tier === t).map(d => d.id));
@@ -105,6 +134,10 @@ const normalDrops = (scroll, scrollA, weapon, armor, gearChance, potions, tier, 
   { pool: RARE_POOLS[tier - 1], count: 1, chance: 0.002 },
   // 11차: 고급 강화 주문서(폐광·성터만)
   ...(tier >= 3 ? [{ id: 'weaponScrollB', count: 1, chance: 0.002 }, { id: 'armorScrollB', count: 1, chance: 0.002 }] : []),
+  // 14차: 스킬 카드(지역 단계 목록 중 하나) [가정]
+  { pool: CARD_POOLS[tier - 1], count: 1, chance: tier === 1 ? 0.008 : 0.01 }, // ⑤ #5: 한 스킬 Lv5(11장)를 목표로 할 수 있게 [가정]
+  // 15차: 성터에서만 엘릭서(아주 드묾) [가정]
+  ...(tier === 4 ? [{ pool: ELIXIRS, count: 1, chance: 0.0005 }] : []),
 ];
 const FIELD_DROPS = normalDrops(0.01, 0.015, 'ironSword', 'leatherArmor', 0.005, [['potion', 0.06]], 1, 0.0015, 0.005);
 const FOREST_DROPS = normalDrops(0.02, 0.025, 'steelSword', 'chainArmor', 0.01, [['potion', 0.04], ['potionMid', 0.02]], 2, 0.002, 0.008);
@@ -134,6 +167,10 @@ const rows = [
     { pool: RARE_POOLS[2], count: 1, chance: 0.3 },
     { id: 'weaponScrollB', count: 1, chance: 0.2 },
     { id: 'armorScrollB', count: 1, chance: 0.2 },
+    { pool: BOSS_CARDS, count: 1, chance: 0.4 },
+    { pool: ELIXIRS, count: 1, chance: 0.15 }, // 15차
+    { id: 'dollBox', count: 1, chance: 0.1 },
+    { id: 'bossCoin', count: 2, guaranteed: true }, // 19차
   ]],
   // 4차: 망자의 성터(권장 31~40). 10차: 미스릴 세트·희귀·새 무기로 30→40이 빨라져 경험치 ×0.93(1102·1598·2344·3380 → 아래 값)
   ['wisp', '떠도는 넋', 30, 940, 48, 40, 1025, 120, 'ruin', false, RUIN_DROPS],
@@ -148,6 +185,10 @@ const rows = [
     { pool: RARE_POOLS[3], count: 1, chance: 0.3 },
     { id: 'weaponScrollB', count: 1, chance: 0.2 },
     { id: 'armorScrollB', count: 1, chance: 0.2 },
+    { pool: BOSS_CARDS, count: 1, chance: 0.4 },
+    { pool: ELIXIRS, count: 1, chance: 0.15 }, // 15차
+    { id: 'dollBox', count: 1, chance: 0.1 },
+    { id: 'bossCoin', count: 4, guaranteed: true }, // 19차
   ]],
 ];
 // 5차(대표님 의견 '돈이 너무 없다'): 일반 몬스터 돈 평균 × 2.5(반올림). 보스는 그대로
@@ -264,6 +305,31 @@ export default {
   ],
   // 9차 단축 칸에 넣을 수 있는 물건
   hotbarItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll'],
+  // 13차 자동 보충: 마을에 들어오면 목표 개수까지 사는 물건(순서 = 돈이 모자랄 때 먼저 사는 순서)과 목표 단계
+  restockItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll', 'weaponScroll', 'armorScroll'],
+  restockSteps: [0, 5, 10, 20, 30, 50, 100, 200, 300, 500, 999],
+  // 14차 스킬 레벨(1~maxLv): 올릴 때 그 스킬 카드 cards[L−1]장 + 돈 gold[L−1]. 효과는 skills.skillAt [가정]
+  skillGrades: SKILL_GRADES, gradeOrder: GRADE_ORDER, gradeNames: { common: '일반', uncommon: '고급', rare: '희귀', hero: '영웅' },
+  skillUp: { maxLv: 5, cards: [1, 2, 3, 5], gold: [500, 2000, 6000, 15000], multPerLv: 0.1, cdPerLv: 0.05, blockPerLv: 3, healPerLv: 3, guardPerLv: 0.03, counterPerLv: 10 },
+  cardFuse: 3, // 같은 카드 이만큼 → 다음 등급 카드 1장
+  // 15차 [가정]: 엘릭서 능력치마다 최대 5개, 경험치 복구 돈 = 잃은 경험치 × 0.5, 마법인형 4종(하나만 데리고 다님, 효과는 영구 효과와 같은 모양)
+  elixirMax: 5, recoverGoldPerExp: 0.5, dollRefund: 1500,
+  // 19차 보스 코인 교환표(코인 값) [가정]
+  // ⑤ #1·#2: 확정 보상이라 기존 확률 보상을 앞지르지 않게 — 성검 카드 20(큰울림 10회·기사왕 5회), 엘릭서 15, 희귀 카드 5
+  coinShop: [
+    { id: 'elixirStr', coins: 15 }, { id: 'elixirDex', coins: 15 }, { id: 'elixirCon', coins: 15 },
+    { id: 'card_ult', coins: 20 }, { id: 'card_whirl', coins: 5 }, { id: 'card_guard', coins: 5 }, { id: 'card_counter', coins: 5 },
+    { id: 'dollBox', coins: 3 }, { id: 'weaponScrollB', coins: 2 }, { id: 'armorScrollB', coins: 2 },
+  ],
+  mapTeleportMin: 40, // 16차: 마을 밖에서 지도로 순간이동하면 마법사 값의 2배(최소 이 값) [가정]
+  // 16차 자동 순환(⑤ #1·#4) [가정]: 출발 체력(최대의 비율)·최소 물약·체력 기다림 상한·출발 뒤 이 시간 안에 다시 귀환하면 연속으로 셈·연속 상한
+  cycle: { hpRatio: 0.9, minPotions: 5, waitHpMs: 90000, quickMs: 60000, quickMax: 2 },
+  dolls: [
+    { id: 'wolf', name: '늑대 인형', color: 0xc9ccd8, fx: { dmg: 2 }, desc: '피해 +2' },
+    { id: 'golem', name: '돌골렘 인형', color: 0xb08a5a, fx: { def: 3 }, desc: '방어 +3' },
+    { id: 'fairy', name: '요정 인형', color: 0x8affb0, fx: { hp: 40 }, desc: '최대 체력 +40' },
+    { id: 'owl', name: '올빼미 인형', color: 0xffd36a, fx: { expPct: 5 }, desc: '경험치 +5%' },
+  ],
   // 10차 버프(쓰는 아이템). 남은 시간은 저장(save.buffs, 게임 시계 ms). 또 쓰면 남은 시간에 더함, 상한 = 시간 × buffStackMax
   buffs: [
     { id: 'power', item: 'powerPotion', name: '힘', durationMs: 600000, dmgPct: 15, desc: '10분 동안 주는 피해 +15%' },

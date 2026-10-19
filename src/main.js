@@ -106,14 +106,25 @@ $('btnBag').onclick = () => { if (G.started && !G.pending) G.ui.open('bag'); };
 $('btnInfo').onclick = () => { if (G.started && !G.pending) G.ui.open('me'); };
 $('btnMap').onclick = () => { if (G.started && !G.pending) G.ui.open('map'); };
 $('btnMenu').onclick = () => {
-  syncUpdate(false);
+  if (G.ui?.isOpen) G.ui.close(); // 13차: 반쪽 가방이 열려 있으면 닫고 메뉴
+  syncUpdate(false); syncCheckBtn();
   $('menu').hidden = false; $('ioBox').hidden = true; G.pause.add('menu');
   $('menuRate').textContent = G.save ? `(경험치 ×${G.save.rates.exp} · 드랍 ×${G.save.rates.drop} · 돈 ×${G.save.rates.gold} · 강화 ×${G.save.rates.enchant})` : '';
   $('btnRates').hidden = !G.started;
+  // 17차 즐겨찾기
+  const fav = G.scene?.prefs?.fav, ft = fav && bal.teleport.find((t) => t.id === fav);
+  $('btnFav').hidden = !G.started || !ft;
+  if (ft) $('favName').textContent = `${ft.name}로 순간이동 · ${(G.ui.favCost(fav) ?? 0).toLocaleString('ko-KR')}원`;
 };
 // 배율 창: 메뉴를 닫고 가방·상점과 같은 창으로 연다(창이 열려 있는 동안 게임 멈춤)
 const openRates = () => { if (!G.started || G.pending) return; $('menu').hidden = true; G.pause.delete('menu'); G.ui.open('rates'); };
 $('btnRates').onclick = openRates;
+$('btnFav').onclick = () => {
+  const fav = G.scene?.prefs?.fav;
+  if (!G.started || G.pending || !fav) return;
+  $('menu').hidden = true; G.pause.delete('menu');
+  G.ui.goFav(fav);
+};
 $('hudRate').onclick = openRates;
 $('btnResume').onclick = () => { $('menu').hidden = true; G.pause.delete('menu'); };
 $('btnSaveNow').onclick = () => { if (G.persist('menu')) hud.toast('저장했습니다'); };
@@ -180,6 +191,30 @@ function syncUpdate(announce) {
   }
 }
 addEventListener('hw-update', () => syncUpdate(true));
+// 13차 [업데이트 확인]: 메뉴를 열 때마다 지금 버전 표시, 누르면 register.js check()로 바로 찾기
+let checkingUpd = false;
+function syncCheckBtn() {
+  const u = window.__hwUpdate;
+  $('curVer').textContent = u?.current ? `지금 v${u.current.slice(0, 6)}` : u ? '' : '홈 화면 앱에서만';
+  $('btnCheckUpd').disabled = checkingUpd || !u;
+  $('chkLabel').textContent = checkingUpd ? '새 버전 찾는 중…' : '업데이트 확인';
+}
+const CHECK_TEXT = {
+  latest: '최신 버전입니다',
+  offline: '인터넷이 연결되어 있지 않아 확인하지 못했습니다',
+  busy: '새 버전을 받는 중입니다. 잠시 뒤 메뉴를 다시 열어 주세요',
+  error: '지금은 확인하지 못했습니다. 잠시 뒤 다시 눌러 주세요',
+};
+$('btnCheckUpd').onclick = async () => {
+  const u = window.__hwUpdate;
+  if (!u?.check || checkingUpd) return;
+  checkingUpd = true; syncCheckBtn();
+  let r;
+  try { r = await u.check(); } catch { r = { result: 'error' }; }
+  checkingUpd = false; syncCheckBtn();
+  if (r.result === 'ready') { syncUpdate(false); hud.toast(`새 버전 v${(r.version || '').slice(0, 6)}이 준비됐습니다 — 위의 [지금 업데이트]를 누르세요`, 3500); }
+  else hud.toast(`${CHECK_TEXT[r.result] ?? CHECK_TEXT.error}${r.result === 'latest' && r.version ? ` (v${r.version.slice(0, 6)})` : ''}`, 3000);
+};
 $('btnUpdate').onclick = async () => {
   const u = window.__hwUpdate;
   if (!u || u.state !== 'ready' || G.updating || !G.started) return;

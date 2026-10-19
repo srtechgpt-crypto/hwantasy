@@ -3,6 +3,7 @@
 // 방어구는 전투력(초당 피해 + 방어 × 1.5 + 최대 체력/10 + 재생) 차이로 본다. 근사치라 화면에는 '약'을 붙인다.
 // '안 쓰는 장비 모두 팔기'(isJunkGear)는 따로 더 보수적인 규칙(같은 계열·모든 기본 수치 이하·세트 후보 보호)을 쓴다.
 import { itemDef, integer, isGearDef, slotOf, EQUIP_SLOTS } from './common.js';
+import { elixirExtra, sumExtra } from './growth.js';
 import { playerStats } from './progression.js';
 import { applyBuffs } from './buffs.js';
 import { applyMorph, morphExtra } from './morph.js';
@@ -54,7 +55,7 @@ export function loadoutStats(save, bal, slot = null, item = undefined) {
   const equip = Object.fromEntries(EQUIP_SLOTS.map(s => [s, save.bag.find(i => i.uid === save.equip?.[s]) ?? null]));
   if (slot) equip[slot] = item ?? null;
   // 11차: 변신 무작위 힘·민첩은 원래 능력치에, 그다음 버프, 그다음 변신 효과(간격은 같은 atkMul에 곱함) — 게임 화면·비교·창이 모두 이 함수
-  const st = playerStats(save.player.level, equip, bal, save.player.bonus, save.morph?.cur ? morphExtra(save.morph) : null, permOf(save, bal)); // 12차 도감·칭호
+  const st = playerStats(save.player.level, equip, bal, save.player.bonus, sumExtra(elixirExtra(save), save.morph?.cur ? morphExtra(save.morph) : null), permOf(save, bal)); // 12차 도감·칭호, 15차 엘릭서
   return applyMorph(applyBuffs(st, save.buffs, save.player.level, bal), save.morph, bal);
 }
 // 이 장비를 그 칸에 끼었을 때의 점수(무기 = 초당 피해, 방어구 = 전투력). 장비가 아니면 null
