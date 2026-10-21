@@ -794,7 +794,7 @@ export function initWindows() {
   // 세트마다 칸 그림(넣음=밝게+✓, 가방에 넣을 수 있는 +0 장비가 있음=노란 테두리, 없음=흐리게), n/m, 효과, [넣기 N]
   // [넣기]는 확인 상자(쓰일 장비 이름 목록)를 먼저 — 확인한 uid 그대로만 등록된다(⑤ #15·#17)
   const CODEX_GROUPS = [['무기 모음', (id) => id.startsWith('wpn')], ['머리·몸 (투구·티셔츠·망토·장갑)', (id) => id.startsWith('top')],
-    ['허리·다리 (벨트·바지·부츠)', (id) => id.startsWith('low')], ['빛나는 장비', (id) => id.startsWith('rare')], ['특별', (id) => id === 'body' || id === 'lich']];
+    ['허리·다리 (벨트·바지·부츠)', (id) => id.startsWith('low')], ['빛나는 장비', (id) => id.startsWith('rare')], ['특별', (id) => ['body', 'lich', 'drake'].includes(id)]]; // 21차 ⑤ #12
   function viewCodex(s) {
     const done = col.doneSets(s.codex, bal).length, total = bal.codex.length, p = col.permOf({ ...s, title: null }, bal);
     const sum = col.fxText(p) || '아직 없음';

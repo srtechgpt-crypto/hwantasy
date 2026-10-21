@@ -1,12 +1,14 @@
 // 「환타지」 지도: 바람 마을 | 이슬 들판 | 그늘 숲 | 잿돌 폐광(큰울림의 방) | 망자의 성터(기사왕의 방)가 이어진 한 장.
 // 4차: 폭 204 → 264. x < OLD_W(204)는 3차와 같은 모양(같은 난수 순서) — 바뀌는 곳은 성터로 가는 굴(CHANGED_4)뿐.
+// 21차: 폭 264 → 324. x < RUIN_W(264)는 20차와 같은 모양 — 바뀌는 곳은 서리 봉우리로 가는 굴(TUNNEL2·FROST_PATH)뿐.
 // 마을·들판 좌표는 1차와 같다(1차 저장 위치가 그대로 맞음). 타일 번호 = 행 × 28 + 열 (assets/tiles.png, 16×16).
 const COLS = 28;
 const t = (c, r) => r * COLS + c;
 
 export const TILE = 16;
-export const W = 264;
+export const W = 324;
 export const OLD_W = 204; // 3차까지의 폭(이 안쪽은 모양을 바꾸지 않는다)
+export const RUIN_W = 264; // 4차~20차의 폭(21차: 이 안쪽은 굴 칸 말고 바꾸지 않는다)
 export const H = 44;
 export const TOWN_W = 24; // x < TOWN_W 는 마을
 
@@ -16,17 +18,24 @@ export const REGIONS = [
   { id: 'field', name: '이슬 들판', x0: 24, x1: 84 },
   { id: 'forest', name: '그늘 숲', x0: 84, x1: 140 },
   { id: 'mine', name: '잿돌 폐광', x0: 140, x1: OLD_W },
-  { id: 'ruin', name: '망자의 성터', x0: OLD_W, x1: W },
+  { id: 'ruin', name: '망자의 성터', x0: OLD_W, x1: RUIN_W }, // 21차 ⑤ #8: 서리 봉우리와 겹치지 않게
+  { id: 'frost', name: '서리 봉우리', x0: RUIN_W, x1: W },
 ];
 // 보스 방 안쪽(칸). 입구는 각 방 왼쪽 벽의 y 20~23. id = 보스 몬스터 id
 export const BOSS_ROOMS = [
   { id: 'boss', name: '큰울림의 방', x0: 190, x1: 202, y0: 14, y1: 30 },
   { id: 'lich', name: '기사왕의 방', x0: 250, x1: 262, y0: 14, y1: 30 },
+  { id: 'drake', name: '서리 용의 둥지', x0: 310, x1: 322, y0: 14, y1: 30 }, // 21차
 ];
 export const bossRoomOf = id => BOSS_ROOMS.find(r => r.id === id) ?? null;
 // 폐광 → 성터 굴(큰울림의 방 위, y 6~9). 이 칸들만 3차와 달라도 된다(시험이 확인)
 export const TUNNEL = { x0: 188, x1: OLD_W, y0: 6, y1: 10 };
 export const CHANGED_4 = [TUNNEL];
+// 21차: 성터 → 서리 봉우리 굴(기사왕의 방 아래, y 34~37). 성터를 다 그린 뒤 이 칸만 비운다(⑤ #9)
+export const TUNNEL2 = { x0: 246, x1: RUIN_W, y0: 34, y1: 38 };
+// 굴 출구 ~ 순간이동 자리(서리 쪽, 물건을 놓지 않는 칸 — ⑤ #10)
+export const FROST_PATH = { x0: RUIN_W, x1: 272, y0: 32, y1: 40 };
+export const CHANGED_21 = [TUNNEL2];
 const PATH_Y0 = 19, PATH_Y1 = 25; // 지역 사이 길(y 19~24)
 
 // 순간이동 목적지(픽셀, 각 지역 입구)
@@ -35,6 +44,7 @@ export const TELEPORTS = [
   { id: 'forest', x: 87 * TILE + 8, y: 22 * TILE + 8 },
   { id: 'mine', x: 143 * TILE + 8, y: 22 * TILE + 8 },
   { id: 'ruin', x: 207 * TILE + 8, y: 8 * TILE + 8 },
+  { id: 'frost', x: 268 * TILE + 8, y: 36 * TILE + 8 }, // 21차: 굴 출구 옆
 ];
 
 // 마을 NPC(칸). kind는 창 종류
@@ -92,6 +102,8 @@ export const ZONES = [
   { id: 'mineFar', mapId: 'mine', x0: 166, x1: 186, y0: 3, y1: 40, monsters: ['ember', 'stalker'], count: 15 },
   { id: 'ruinNear', mapId: 'ruin', x0: 208, x1: 230, y0: 3, y1: 40, monsters: ['wisp', 'skull'], count: 18 },
   { id: 'ruinFar', mapId: 'ruin', x0: 230, x1: 246, y0: 3, y1: 40, monsters: ['warden', 'eye'], count: 15 },
+  { id: 'frostNear', mapId: 'frost', x0: 272, x1: 290, y0: 3, y1: 40, monsters: ['frostjelly', 'icesprite'], count: 18 },
+  { id: 'frostFar', mapId: 'frost', x0: 290, x1: 306, y0: 3, y1: 40, monsters: ['frostbeetle', 'blizzsnake'], count: 15 },
 ];
 
 function rng(seed) {
@@ -110,6 +122,53 @@ export function regionName(id) { return REGIONS.find((r) => r.id === id)?.name ?
 export function inBossRoom(px, py) {
   const tx = px / TILE, ty = py / TILE;
   return BOSS_ROOMS.find(R => tx >= R.x0 && tx < R.x1 && ty >= R.y0 && ty < R.y1) ?? null;
+}
+
+// 21차 눈 타일(assets/tiles.png). 눈 바닥·눈 소나무·눈 덤불·얼음 수정·눈 바위
+const SNOW = [t(19, 18), t(19, 18), t(19, 18), t(20, 18), t(19, 19)];
+const FROST_OBJECTS = {
+  snowPine: { c: 0, r: 19, w: 2, h: 2, solidRows: 1 },
+  snowPine2: { c: 0, r: 22, w: 2, h: 2, solidRows: 1 },
+  snowBush: { c: 0, r: 25, w: 2, h: 2, solidRows: 1 },
+  iceRock: { c: 8, r: 25, w: 2, h: 2, solidRows: 2 },
+  snowRock: { c: 10, r: 25, w: 2, h: 2, solidRows: 1 },
+  iceCrystal: { c: 6, r: 21, w: 1, h: 1, solidRows: 1 },
+  snowStone: { c: 6, r: 24, w: 1, h: 1, solidRows: 1 },
+};
+function buildFrost({ ground, deco, over, solid, place, free, onPath }) {
+  const fr = rng(20261021);
+  const putF = (name, x, y) => {
+    const o = FROST_OBJECTS[name];
+    for (let j = 0; j < o.h; j++) for (let i = 0; i < o.w; i++) {
+      if (y + j < 0 || y + j >= H || x + i < 0 || x + i >= W) continue;
+      const idx = t(o.c + i, o.r + j);
+      if (j >= o.h - o.solidRows) { deco[y + j][x + i] = idx; solid[y + j][x + i] = true; } else over[y + j][x + i] = idx;
+    }
+  };
+  const inRect = (x, y, w, h, R) => x < R.x1 && x + w > R.x0 && y < R.y1 && y + h > R.y0;
+  for (let y = 0; y < H; y++) for (let x = RUIN_W; x < W; x++) ground[y][x] = SNOW[Math.floor(fr() * SNOW.length)];
+  for (let y = FROST_PATH.y0 + 2; y < FROST_PATH.y1 - 2; y++) for (let x = FROST_PATH.x0; x < FROST_PATH.x1; x++) ground[y][x] = STONE;
+  // 위아래·오른쪽 끝 벽(얼음 바위), 서리 용의 둥지(입구 = 왼쪽 벽 y 20~23)
+  for (let x = RUIN_W; x < W; x += 2) { putF('iceRock', x, 0); putF('iceRock', x, H - 2); }
+  for (let y = 2; y < H - 2; y += 2) putF('iceRock', W - 2, y);
+  const R3 = BOSS_ROOMS[2];
+  for (let y = R3.y0 - 2; y < R3.y1 + 2; y += 2) if (y + 2 <= 20 || y >= 24) putF('iceRock', R3.x0 - 2, y);
+  for (let x = R3.x0 - 2; x < W - 2; x += 2) { putF('iceRock', x, R3.y0 - 2); putF('iceRock', x, R3.y1); }
+  for (let y = 2; y < R3.y0 - 2; y += 2) for (let x = R3.x0 - 2; x < W - 2; x += 2) if (free(x, y, 2, 2)) putF('iceRock', x, y);
+  for (let y = R3.y1 + 2; y < H - 2; y += 2) for (let x = R3.x0 - 2; x < W - 2; x += 2) if (free(x, y, 2, 2)) putF('iceRock', x, y);
+  for (let y = R3.y0; y < R3.y1; y++) for (let x = R3.x0; x < R3.x1; x++) ground[y][x] = t(20, 19);
+  place('sign', R3.x0 - 4, 19);
+  // 눈밭 물건: 굴 출구·순간이동 자리(FROST_PATH)와 보스 방 앞길은 비운다
+  const objs = ['snowPine', 'snowPine2', 'snowBush', 'iceCrystal', 'snowRock', 'snowStone', 'snowPine'];
+  for (let n = 0; n < 360; n++) {
+    const name = objs[Math.floor(fr() * objs.length)];
+    const o = FROST_OBJECTS[name];
+    const x = RUIN_W + 2 + Math.floor(fr() * 42), y = 3 + Math.floor(fr() * (H - 7));
+    if (inRect(x - 1, y - 1, o.w + 2, o.h + 2, FROST_PATH)) continue;
+    if (onPath(y, o.h) && x > R3.x0 - 8) continue;
+    if (x + o.w > R3.x0 - 3) continue;
+    if (free(x - 1, y - 1, o.w + 2, o.h + 2)) putF(name, x, y);
+  }
 }
 
 export function buildWorld() {
@@ -136,6 +195,11 @@ export function buildWorld() {
     }
   };
   const onPath = (y, h) => y + h > PATH_Y0 - 1 && y < PATH_Y1 + 1;
+  // 21차: 성터는 20차 폭(RUIN_W) 기준의 끝 판정으로 놓는다(지도 폭이 늘어도 같은 모양)
+  const freeR = (x, y, w, h) => {
+    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (i >= RUIN_W - 1) return false;
+    return free(x, y, w, h);
+  };
 
   // ---------- 마을 + 들판 (1차와 같은 순서·같은 난수 → 같은 모양) ----------
   const FIELD_END = 84;
@@ -231,15 +295,15 @@ export function buildWorld() {
   // ---------- 망자의 성터 (4차, 별도 난수 — 3차 칸의 모양에 영향 없음) ----------
   const ur = rng(20261015);
   const RUIN_FLOOR = [...CAVE_FLOOR, STONE, STONE];
-  for (let y = 0; y < H; y++) for (let x = OLD_W; x < W; x++) ground[y][x] = RUIN_FLOOR[Math.floor(ur() * RUIN_FLOOR.length)];
+  for (let y = 0; y < H; y++) for (let x = OLD_W; x < RUIN_W; x++) ground[y][x] = RUIN_FLOOR[Math.floor(ur() * RUIN_FLOOR.length)];
   for (let y = TUNNEL.y0; y < TUNNEL.y1; y++) for (let x = TUNNEL.x0; x < TUNNEL.x1; x++) ground[y][x] = STONE; // 굴 바닥
-  for (let x = OLD_W; x < W; x += 2) { place('wallRock', x, 0); place('wallRock', x, H - 2); }
-  for (let y = 2; y < H - 2; y += 2) place('wallRock', W - 2, y);
+  for (let x = OLD_W; x < RUIN_W; x += 2) { place('wallRock', x, 0); place('wallRock', x, H - 2); }
+  for (let y = 2; y < H - 2; y += 2) place('wallRock', RUIN_W - 2, y);
   const R2 = BOSS_ROOMS[1];
   for (let y = R2.y0 - 2; y < R2.y1 + 2; y += 2) if (y + 2 <= 20 || y >= 24) place('wallRock', R2.x0 - 2, y);
-  for (let x = R2.x0 - 2; x < W - 2; x += 2) { place('wallRock', x, R2.y0 - 2); place('wallRock', x, R2.y1); }
-  for (let y = 2; y < R2.y0 - 2; y += 2) for (let x = R2.x0 - 2; x < W - 2; x += 2) if (free(x, y, 2, 2)) place('wallRock', x, y);
-  for (let y = R2.y1 + 2; y < H - 2; y += 2) for (let x = R2.x0 - 2; x < W - 2; x += 2) if (free(x, y, 2, 2)) place('wallRock', x, y);
+  for (let x = R2.x0 - 2; x < RUIN_W - 2; x += 2) { place('wallRock', x, R2.y0 - 2); place('wallRock', x, R2.y1); }
+  for (let y = 2; y < R2.y0 - 2; y += 2) for (let x = R2.x0 - 2; x < RUIN_W - 2; x += 2) if (freeR(x, y, 2, 2)) place('wallRock', x, y);
+  for (let y = R2.y1 + 2; y < H - 2; y += 2) for (let x = R2.x0 - 2; x < RUIN_W - 2; x += 2) if (freeR(x, y, 2, 2)) place('wallRock', x, y);
   place('sign', R2.x0 - 4, 19);
   // 무너진 성터: 마른 나무·돌·보라 수정·바위 기둥. 굴 입구와 보스 방 앞길은 비운다
   const ruinObjs = ['deadTree', 'stone', 'crystalP', 'rock', 'wallRock', 'stone'];
@@ -250,8 +314,16 @@ export function buildWorld() {
     if (x < OLD_W + 8 && y < TUNNEL.y1 + 3) continue; // 굴 입구·순간이동 자리
     if (onPath(y, o.h) && x > R2.x0 - 8) continue;    // 보스 방 앞길
     if (x + o.w > R2.x0 - 3) continue;
-    if (free(x - 1, y - 1, o.w + 2, o.h + 2)) place(name, x, y);
+    if (freeR(x - 1, y - 1, o.w + 2, o.h + 2)) place(name, x, y);
   }
+  // 21차 ⑤ #9: 성터를 20차 순서대로 다 그린 뒤 굴 칸의 네 층을 비운다(바닥은 돌길)
+  for (let y = TUNNEL2.y0; y < TUNNEL2.y1; y++) for (let x = TUNNEL2.x0; x < TUNNEL2.x1; x++) {
+    ground[y][x] = STONE; deco[y][x] = -1; over[y][x] = -1; solid[y][x] = false;
+  }
+  // 2칸짜리 바위 윗줄이 굴 바로 위 칸(y 33)에 걸쳐 있으면 아래 반쪽이 사라져 보이므로, 굴 위 칸의 over도 둔다(그림만, 막힘 없음)
+
+  // ---------- 서리 봉우리 (21차, 별도 난수 — 20차 칸의 모양에 영향 없음) ----------
+  buildFrost({ ground, deco, over, solid, place, free, onPath });
 
   // NPC 자리는 막힘(그림은 장면이 그림)
   for (const n of NPCS) solid[n.y][n.x] = true;
@@ -267,6 +339,8 @@ export function buildWorld() {
       { x: (R.x0 - 4) * TILE + 8, y: 17 * TILE + 8, text: '큰울림의 방' },
       { x: (TUNNEL.x0 - 3) * TILE, y: (TUNNEL.y0 - 1) * TILE, text: '망자의 성터 →' },
       { x: (R2.x0 - 4) * TILE + 8, y: 17 * TILE + 8, text: '기사왕의 방' },
+      { x: (TUNNEL2.x0 - 1) * TILE, y: (TUNNEL2.y0 - 1) * TILE, text: '서리 봉우리 →' },
+      { x: (BOSS_ROOMS[2].x0 - 4) * TILE + 8, y: 17 * TILE + 8, text: '서리 용의 둥지' },
     ],
   };
 }

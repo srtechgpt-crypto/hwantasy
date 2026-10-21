@@ -8,6 +8,9 @@ const weapons = [
   // 4차: 미스릴(대장장이 판매)·망령(기사왕 전용)
   { id: 'mithrilSword', name: '미스릴검', kind: 'weapon', min: 9, max: 22, price: 60000, shop: true, sellRate: 0.25, tier: 4 },
   { id: 'wraithSword', name: '망령검', kind: 'weapon', min: 13, max: 30, price: 30000, shop: false, sellRate: 0.25 },
+  // 21차: 서리강(대장장이 판매, 5등급)·용비늘(서리 용 전용). p21 = 21차 아이템(v14 이하 기록에는 없음) [가정]
+  { id: 'frostSword', name: '서리강검', kind: 'weapon', min: 14, max: 32, price: 750000, shop: true, sellRate: 0.25, tier: 5, p21: true },
+  { id: 'drakeSword', name: '용비늘검', kind: 'weapon', min: 18, max: 40, price: 80000, shop: false, sellRate: 0.25, p21: true },
 ].map(def => ({ type: 'sword', ...def }));
 // 10차 무기 계열: 검 등급(철·강철·깊은돌·미스릴)의 주사위를 바탕으로 계열마다 성격을 준다.
 // dmgPct = 최종 피해 %(스킬·치명과 함께 곱함), speedPct = 공격 간격 %(+는 느림, 최소 간격도 같은 비율), crit = 치명 %p, hit = 명중 %p.
@@ -19,7 +22,7 @@ export const WEAPON_TYPES = [
   { type: 'spear', key: 'Spear', noun: '창', hit: 5, desc: '명중 +5%' },
   { type: 'dagger', key: 'Dagger', noun: '단검', dmgPct: -25, speedPct: -25, crit: 10, desc: '빠르고 치명 +10%' },
 ];
-const WEAPON_TIERS = [['iron', '철', 'ironSword'], ['steel', '강철', 'steelSword'], ['deep', '깊은돌', 'deepSword'], ['mithril', '미스릴', 'mithrilSword']];
+const WEAPON_TIERS = [['iron', '철', 'ironSword'], ['steel', '강철', 'steelSword'], ['deep', '깊은돌', 'deepSword'], ['mithril', '미스릴', 'mithrilSword'], ['frost', '서리강', 'frostSword']];
 for (const wt of WEAPON_TYPES.slice(1)) {
   WEAPON_TIERS.forEach(([key, pre, baseId], i) => {
     const b = weapons.find(w => w.id === baseId);
@@ -29,7 +32,7 @@ for (const wt of WEAPON_TYPES.slice(1)) {
       min: Math.max(1, Math.floor(b.min * lo)), max: Math.ceil(b.max * hi),
       ...(wt.dmgPct ? { dmgPct: wt.dmgPct } : {}), ...(wt.speedPct ? { speedPct: wt.speedPct } : {}),
       ...(wt.crit ? { crit: wt.crit } : {}), ...(wt.hit ? { hit: wt.hit } : {}),
-      price: b.price, shop: b.shop, sellRate: 0.25,
+      price: b.price, shop: b.shop, sellRate: 0.25, ...(b.p21 ? { p21: true } : {}),
     });
   });
 }
@@ -40,37 +43,40 @@ const armors = [
   { id: 'plateArmor', name: '판금갑옷', kind: 'armor', def: 9, price: 4800, shop: false, sellRate: 0.25, tier: 3 },
   { id: 'mithrilArmor', name: '미스릴갑옷', kind: 'armor', def: 11, price: 50000, shop: true, sellRate: 0.25, tier: 4 },
   { id: 'wraithArmor', name: '망령갑옷', kind: 'armor', def: 14, price: 26000, shop: false, sellRate: 0.25 },
+  { id: 'frostArmor', name: '서리강갑옷', kind: 'armor', def: 15, price: 600000, shop: true, sellRate: 0.25, tier: 5, p21: true },
+  { id: 'drakeArmor', name: '용비늘갑옷', kind: 'armor', def: 19, price: 70000, shop: false, sellRate: 0.25, p21: true },
 ].map(def => ({ slot: 'armor', ...def }));
-// 8차: 갑옷 외 7부위(kind 'armor' + slot). 4등급 = 들판·숲·폐광·성터. 강화는 갑옷 주문서, 1단계마다 방어 +1
+// 8차: 갑옷 외 7부위(kind 'armor' + slot). 4등급 = 들판·숲·폐광·성터(21차: 5등급 서리 봉우리). 강화는 갑옷 주문서, 1단계마다 방어 +1
 const PARTS = [
-  ['helm', '투구', ['가죽', '철', '강철', '미스릴'], t => ({ def: [1, 1, 2, 3][t], hp: [0, 10, 15, 25][t] })],
-  ['shirt', '티셔츠', ['면', '질긴', '수호', '미스릴'], t => ({ hp: [10, 25, 45, 70][t] })],
-  ['cloak', '망토', ['천', '가죽', '수호', '미스릴'], t => ({ def: [1, 1, 2, 3][t], regen: [0, 1, 1, 2][t] })],
-  ['gloves', '장갑', ['가죽', '철', '강철', '미스릴'], t => ({ hit: [2, 4, 6, 8][t], dmg: [0, 1, 2, 3][t] })],
-  ['belt', '벨트', ['가죽', '철', '강철', '미스릴'], t => ({ hp: [15, 30, 50, 80][t] })],
-  ['pants', '바지', ['천', '가죽', '사슬', '미스릴'], t => ({ def: [1, 2, 2, 3][t], hp: [0, 0, 15, 25][t] })],
-  ['boots', '부츠', ['가죽', '철', '강철', '미스릴'], t => ({ def: [0, 1, 1, 2][t], regen: t + 1 })],
+  ['helm', '투구', ['가죽', '철', '강철', '미스릴', '서리강'], t => ({ def: [1, 1, 2, 3, 4][t], hp: [0, 10, 15, 25, 35][t] })],
+  ['shirt', '티셔츠', ['면', '질긴', '수호', '미스릴', '서리강'], t => ({ hp: [10, 25, 45, 70, 100][t] })],
+  ['cloak', '망토', ['천', '가죽', '수호', '미스릴', '서리강'], t => ({ def: [1, 1, 2, 3, 4][t], regen: [0, 1, 1, 2, 2][t] })],
+  ['gloves', '장갑', ['가죽', '철', '강철', '미스릴', '서리강'], t => ({ hit: [2, 4, 6, 8, 10][t], dmg: [0, 1, 2, 3, 4][t] })],
+  ['belt', '벨트', ['가죽', '철', '강철', '미스릴', '서리강'], t => ({ hp: [15, 30, 50, 80, 115][t] })],
+  ['pants', '바지', ['천', '가죽', '사슬', '미스릴', '서리강'], t => ({ def: [1, 2, 2, 3, 4][t], hp: [0, 0, 15, 25, 35][t] })],
+  ['boots', '부츠', ['가죽', '철', '강철', '미스릴', '서리강'], t => ({ def: [0, 1, 1, 2, 3][t], regen: t + 1 })],
 ];
 export const PART_SLOTS = PARTS.map(([slot]) => slot);
-const PART_PRICE = [120, 750, 3800, 25000];
+const PART_PRICE = [120, 750, 3800, 25000, 360000]; // 21차: 5등급은 30레벨대에 미리 사서 성터가 짧아지지 않게 비쌈(시뮬레이터)
 const parts = PARTS.flatMap(([slot, noun, tiers, fx]) => tiers.map((pre, t) => ({
-  id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, tier: t + 1, def: 0, ...fx(t), price: PART_PRICE[t], shop: true, sellRate: 0.25,
+  id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, tier: t + 1, def: 0, ...fx(t), price: PART_PRICE[t], shop: true, sellRate: 0.25, ...(t === 4 ? { p21: true } : {}),
 })));
 const partIds = t => PARTS.map(([slot]) => `${slot}${t}`);
 armors.push(...parts);
 // 18차 장신구(목걸이·반지): 대장장이에서만(드랍 없음), 세트에 안 셈(acc), 강화는 부위 규칙(갑옷 주문서, 안전 +2), 1단계마다 방어 +1 [가정]
 const ACCS = [
-  ['neck', '목걸이', ['가죽끈', '은', '금', '미스릴'], t => ({ hp: [20, 40, 70, 110][t], regen: [0, 1, 1, 2][t] })],
-  ['ring', '반지', ['구리', '은', '금', '미스릴'], t => ({ dmg: [1, 2, 3, 5][t], hit: [1, 2, 4, 6][t] })],
+  ['neck', '목걸이', ['가죽끈', '은', '금', '미스릴', '서리'], t => ({ hp: [20, 40, 70, 110, 160][t], regen: [0, 1, 1, 2, 3][t] })],
+  ['ring', '반지', ['구리', '은', '금', '미스릴', '서리'], t => ({ dmg: [1, 2, 3, 5, 7][t], hit: [1, 2, 4, 6, 8][t] })],
 ];
-const ACC_PRICE = [400, 2000, 9000, 60000];
+const ACC_PRICE = [400, 2000, 9000, 60000, 750000];
 armors.push(...ACCS.flatMap(([slot, noun, tiers, fx]) => tiers.map((pre, t) => ({
-  id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, acc: true, tier: t + 1, def: 0, ...fx(t), price: ACC_PRICE[t], shop: true, sellRate: 0.25, p18: true,
+  id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, acc: true, tier: t + 1, def: 0, ...fx(t), price: ACC_PRICE[t], shop: true, sellRate: 0.25, p18: true, ...(t === 4 ? { p21: true } : {}),
 }))));
 const consumables = [
   { id: 'potion', name: '초급 회복 물약', kind: 'consumable', price: 10, heal: 30, cooldownMs: 1000, shop: true, sellRate: 0.25 },
   { id: 'potionMid', name: '중급 회복 물약', kind: 'consumable', price: 40, heal: 90, cooldownMs: 1000, shop: true, sellRate: 0.25 },
   { id: 'potionHigh', name: '고급 회복 물약', kind: 'consumable', price: 120, heal: 220, cooldownMs: 1000, shop: true, sellRate: 0.25 },
+  { id: 'potionSuper', name: '최고급 회복 물약', kind: 'consumable', price: 300, heal: 400, cooldownMs: 1000, shop: true, sellRate: 0.25, p21: true }, // 21차 [가정]
   { id: 'returnScroll', name: '귀환 주문서', kind: 'consumable', price: 15, shop: true, sellRate: 0.25 },
   { id: 'weaponScroll', name: '무기 강화 주문서', kind: 'consumable', price: 120, shop: true, sellRate: 0.25 },
   { id: 'armorScroll', name: '갑옷 강화 주문서', kind: 'consumable', price: 80, shop: true, sellRate: 0.25 },
@@ -104,7 +110,7 @@ const ELIXIRS = ['elixirStr', 'elixirDex', 'elixirCon'];
 // 19차 보스 코인: 보스가 반드시 떨어뜨림(큰울림 2·기사왕 4), 잡화상 [보스 코인] 탭에서 특별 물건과 바꿈 [가정]
 consumables.push({ id: 'bossCoin', name: '보스 코인', kind: 'consumable', price: 1000, shop: false, sellRate: 0.25, p19: true });
 // 지역 단계별 카드 목록(14차 ⑤ #6: 깊은 지역도 낮은 등급이 나오게 누적 — 들판 일반 / 숲 +고급 / 폐광 +희귀 / 성터 +영웅), 보스는 희귀·영웅
-const CARD_POOLS = [cardsOf('common'), cardsOf('common', 'uncommon'), cardsOf('common', 'uncommon', 'rare'), cardsOf('common', 'uncommon', 'rare', 'hero')];
+const CARD_POOLS = [cardsOf('common'), cardsOf('common', 'uncommon'), cardsOf('common', 'uncommon', 'rare'), cardsOf('common', 'uncommon', 'rare', 'hero'), cardsOf('common', 'uncommon', 'rare', 'hero')]; // 21차: 5단계 = 성터와 같음
 const BOSS_CARDS = cardsOf('rare', 'hero');
 // 10차 희귀 장비: 등급(1~4) 있는 무기·큰 갑옷·부위의 '빛나는' 판(별도 id `<원래>_r`, 상점 없음, 값 2배 — ⑤ #20 판매 돈이 너무 크지 않게).
 // 무기 최소·최대 ×1.25 올림, 방어구는 0 아닌 수치 ×1.5 올림 + 최대 체력 +5×등급. 강화 규칙·부위·세트 등급은 원래와 같다
@@ -117,9 +123,9 @@ const rareWeapons = weapons.filter(d => d.tier).map(rareOf);
 const rareArmors = armors.filter(d => d.tier && !d.acc).map(rareOf); // 18차: 장신구는 희귀판 없음
 weapons.push(...rareWeapons);
 armors.push(...rareArmors);
-export const RARE_POOLS = [1, 2, 3, 4].map(t => [...rareWeapons, ...rareArmors].filter(d => d.tier === t).map(d => d.id));
+export const RARE_POOLS = [1, 2, 3, 4, 5].map(t => [...rareWeapons, ...rareArmors].filter(d => d.tier === t).map(d => d.id));
 // 새 무기 계열(검·희귀 제외) 등급별 목록 — 일반 몬스터 드랍
-const TYPE_POOLS = [1, 2, 3, 4].map(t => weapons.filter(d => d.tier === t && d.type !== 'sword' && !d.rare).map(d => d.id));
+const TYPE_POOLS = [1, 2, 3, 4, 5].map(t => weapons.filter(d => d.tier === t && d.type !== 'sword' && !d.rare).map(d => d.id));
 // 일반 몬스터 드랍(지역 단계별). 4차부터 몬스터마다 드랍을 명시한다(순번으로 정하지 않음)
 // 8차: 물약 종류(지역별)·부위 장비(그 지역 등급, 부위마다 partChance)
 // 10차: pool 드랍 = 한 번 굴려 맞으면 목록 중 하나(다음 난수로 고름). 새 무기 계열(typeChance)·희귀(전체 0.002)
@@ -137,12 +143,13 @@ const normalDrops = (scroll, scrollA, weapon, armor, gearChance, potions, tier, 
   // 14차: 스킬 카드(지역 단계 목록 중 하나) [가정]
   { pool: CARD_POOLS[tier - 1], count: 1, chance: tier === 1 ? 0.008 : 0.01 }, // ⑤ #5: 한 스킬 Lv5(11장)를 목표로 할 수 있게 [가정]
   // 15차: 성터에서만 엘릭서(아주 드묾) [가정]
-  ...(tier === 4 ? [{ pool: ELIXIRS, count: 1, chance: 0.0005 }] : []),
+  ...(tier >= 4 ? [{ pool: ELIXIRS, count: 1, chance: 0.0005 }] : []), // 21차: 서리 봉우리도
 ];
 const FIELD_DROPS = normalDrops(0.01, 0.015, 'ironSword', 'leatherArmor', 0.005, [['potion', 0.06]], 1, 0.0015, 0.005);
 const FOREST_DROPS = normalDrops(0.02, 0.025, 'steelSword', 'chainArmor', 0.01, [['potion', 0.04], ['potionMid', 0.02]], 2, 0.002, 0.008);
 const MINE_DROPS = normalDrops(0.03, 0.04, 'steelSword', 'chainArmor', 0.01, [['potionMid', 0.04], ['potionHigh', 0.01]], 3, 0.002, 0.01);
 const RUIN_DROPS = normalDrops(0.03, 0.04, 'mithrilSword', 'mithrilArmor', 0.01, [['potionMid', 0.03], ['potionHigh', 0.03]], 4, 0.002, 0.006);
+const FROST_DROPS = normalDrops(0.03, 0.04, 'frostSword', 'frostArmor', 0.01, [['potionHigh', 0.04], ['potionSuper', 0.02]], 5, 0.002, 0.006); // 21차
 // [id, 이름, 레벨, 체력, 공격, 방어, 경험치, 평균 돈, 지역, 보스, 드랍]
 // 8차 몬스터: 기사 능력치 성장(힘·민첩·체력)·부위 장비를 상쇄하려고 체력 ×1.5~2.0, 방어는 지역 안 레벨이 높을수록 더(tools/tune8.mjs로 맞춤).
 // 공격은 그대로(옛 기록이 변환 직후 위험해지지 않게)
@@ -190,6 +197,25 @@ const rows = [
     { id: 'dollBox', count: 1, chance: 0.1 },
     { id: 'bossCoin', count: 4, guaranteed: true }, // 19차
   ]],
+  // 21차: 서리 봉우리(권장 41~50). 시뮬레이터 3회에서 젤리 39~40 → 정령 41~42 → 갑각충 43~44 → 뱀 45~49가 차례로 주 대상이 되게 맞춤
+  //      (방어가 높을수록 경험치/체력 비율을 올림). 40→50 시간은 progression.late(필요치 ×1.33)로 맞춤 [계산: 시뮬레이터]
+  ['frostjelly', '서리 젤리', 41, 1600, 84, 86, 3500, 215, 'frost', false, FROST_DROPS],
+  ['icesprite', '얼음 정령', 44, 1920, 92, 98, 4860, 240, 'frost', false, FROST_DROPS],
+  ['frostbeetle', '서리 갑각충', 47, 2240, 100, 106, 6300, 270, 'frost', false, FROST_DROPS],
+  ['blizzsnake', '눈보라 뱀', 49, 2560, 108, 114, 7920, 300, 'frost', false, FROST_DROPS],
+  ['drake', '서리 용', 52, 16000, 140, 70, 80000, 6000, 'frost', true, [
+    { id: 'weaponScroll', count: 4, guaranteed: true },
+    { id: 'armorScroll', count: 4, guaranteed: true },
+    { id: 'drakeSword', count: 1, chance: 0.1 },
+    { id: 'drakeArmor', count: 1, chance: 0.1 },
+    { pool: RARE_POOLS[4], count: 1, chance: 0.3 },
+    { id: 'weaponScrollB', count: 1, chance: 0.2 },
+    { id: 'armorScrollB', count: 1, chance: 0.2 },
+    { pool: BOSS_CARDS, count: 1, chance: 0.4 },
+    { pool: ELIXIRS, count: 1, chance: 0.2 },
+    { id: 'dollBox', count: 1, chance: 0.1 },
+    { id: 'bossCoin', count: 6, guaranteed: true },
+  ]],
 ];
 // 5차(대표님 의견 '돈이 너무 없다'): 일반 몬스터 돈 평균 × 2.5(반올림). 보스는 그대로
 const NORMAL_GOLD_MULT = 2.5;
@@ -203,36 +229,39 @@ const monsters = rows.map(([id, name, level, hp, atk, def, exp, base, mapId, isB
 // 12차 도감: 세트를 이루는 +0 장비를 넣으면 가방에서 사라지고, 세트를 **다 채우면** 효과(부분 효과 없음).
 // 저장은 save.codex[세트 id] = 넣은 아이템 id 목록 — 세트 id·아이템 id는 지우거나 바꾸지 않는다(칸을 더하면 저장 버전을 올린다).
 // 한 아이템은 도감 전체에서 한 세트에만 들어간다(tests/phase12가 확인)
-const SET_NAMES = ['모험가', '숲지기', '광부', '미스릴 기사'];
-const BODY_ARMORS = ['leatherArmor', 'chainArmor', 'plateArmor', 'mithrilArmor'];
-const STEP2 = [1, 1, 2, 2];
+const SET_NAMES = ['모험가', '숲지기', '광부', '미스릴 기사', '서리 기사'];
+const BODY_ARMORS = ['leatherArmor', 'chainArmor', 'plateArmor', 'mithrilArmor']; // 'body' 세트 칸(고정, 21차에도 4종)
+const TIER_ARMORS = [...BODY_ARMORS, 'frostArmor'];
+const STEP2 = [1, 1, 2, 2, 3];
 const CODEX = [
   ...WEAPON_TIERS.map(([pre, name], i) => ({ id: `wpn${i + 1}`, name: `${name} 무기 모음`, items: ['Sword', 'Greatsword', 'Axe', 'Spear', 'Dagger'].map(s => pre + s), fx: { dmg: STEP2[i] } })),
   ...SET_NAMES.map((name, i) => ({ id: `top${i + 1}`, name: `${name} 머리·몸`, items: ['helm', 'shirt', 'cloak', 'gloves'].map(s => `${s}${i + 1}`), fx: { hp: 10 * (i + 1) } })),
   ...SET_NAMES.map((name, i) => ({ id: `low${i + 1}`, name: `${name} 허리·다리`, items: ['belt', 'pants', 'boots'].map(s => `${s}${i + 1}`), fx: { def: STEP2[i] } })),
-  ...WEAPON_TIERS.map(([, name, sword], i) => ({ id: `rare${i + 1}`, name: `빛나는 ${name} 장비`, items: [`${sword}_r`, `${BODY_ARMORS[i]}_r`, `helm${i + 1}_r`], fx: { hit: STEP2[i], expPct: STEP2[i] } })),
+  ...WEAPON_TIERS.map(([, name, sword], i) => ({ id: `rare${i + 1}`, name: `빛나는 ${name} 장비`, items: [`${sword}_r`, `${TIER_ARMORS[i]}_r`, `helm${i + 1}_r`], fx: { hit: STEP2[i], expPct: STEP2[i] } })),
   { id: 'body', name: '갑옷 수집', items: BODY_ARMORS, fx: { hp: 30, def: 1 } },
   { id: 'lich', name: '기사왕의 유품', items: ['wraithSword', 'wraithArmor'], fx: { dmg: 2, def: 2, hp: 30, goldPct: 5 } },
+  { id: 'drake', name: '용의 유품', items: ['drakeSword', 'drakeArmor'], fx: { dmg: 3, def: 3, hp: 40, goldPct: 5 } }, // 21차
 ];
 // 12차 칭호(하나만 씀): 일반 몬스터마다 I 100·II 500·III 2000마리, 효과는 사냥터 종류별 × 단계. 보스 1회, 도감 세트 완성 수.
 // 얻은 목록은 저장하지 않고 처치 수·도감에서 계산한다(처치 수는 줄지 않음)
 const TITLE_STEPS = [[100, 'I'], [500, 'II'], [2000, 'III']];
-const TITLE_FX = { field: k => ({ hp: 10 * k }), forest: k => ({ hit: k }), mine: k => ({ def: k }), ruin: k => ({ dmg: k }) };
+const TITLE_FX = { field: k => ({ hp: 10 * k }), forest: k => ({ hit: k }), mine: k => ({ def: k }), ruin: k => ({ dmg: k }), frost: k => ({ dmg: k, hp: 10 * k }) };
 const TITLES = [
   ...monsters.filter(m => !m.isBoss).flatMap(m => TITLE_STEPS.map(([need, roman], k) => ({ id: `${m.id}${k + 1}`, name: `${m.name} 사냥꾼 ${roman}`, kind: 'kills', mon: m.id, need, fx: TITLE_FX[m.mapId](k + 1) }))),
   { id: 'bossSlayer', name: '큰울림 사냥꾼', kind: 'kills', mon: 'boss', need: 1, fx: { def: 2, hp: 20 } },
   { id: 'lichSlayer', name: '기사왕 처단자', kind: 'kills', mon: 'lich', need: 1, fx: { dmg: 3, def: 2 } },
+  { id: 'drakeSlayer', name: '서리 용 사냥꾼', kind: 'kills', mon: 'drake', need: 1, fx: { dmg: 4, def: 3 } }, // 21차
   ...[[5, 'I', 2], [10, 'II', 4], [15, 'III', 6]].map(([need, roman, pct], i) => ({ id: `collector${i + 1}`, name: `수집가 ${roman}`, kind: 'codex', need, fx: { expPct: pct } })),
 ];
 // 12차 사냥 목표판: 일반 몬스터 N마리(사냥터별). 첫 완료 = 몬스터 N마리분 × firstRate, 반복 = 경험치 × repeatExp·돈 × repeatGold
 // 시뮬레이터(예상 시간 표)는 도감·칭호·목표판을 쓰지 않는다(정비 때 ▲ 아닌 장비는 따로 팔아 도감 보호와 무관) → 실제 게임이 조금 빠름
-const QUEST = { count: { field: 30, forest: 40, mine: 50, ruin: 60 }, firstRate: 0.5, repeatExp: 0.1, repeatGold: 0.2, aheadLevels: 3, killsMax: 1e12 };
+const QUEST = { count: { field: 30, forest: 40, mine: 50, ruin: 60, frost: 70 }, firstRate: 0.5, repeatExp: 0.1, repeatGold: 0.2, aheadLevels: 3, killsMax: 1e12 };
 
 export default {
   version: 1,
   // 5차(스킬·돈 ×2.5): a=155, 성터 경험치 ×1.08 → 시뮬레이터 3회 1→30 10.12h, 30→40 9.85h, 합 19.97h(게임 시계).
   // 계수는 올리기만 한다(v3 기록의 exp가 새 필요치보다 작아야 검사 통과). v2 이하 기록은 save.js의 고정 공식으로 검사·비율 변환
-  progression: { coefficient: 176, exponent: 2.15, early: { untilLevel: 22, startFactor: 0.04, power: 2.5 }, maxLevel: 40, deathLoss: 0.05, lowLevelGap: 5, lowLevelRate: 0.3 }, // 9차: 155→175. 10차: 새 무기 계열·세트·장비 판매로 빨라진 만큼 175→176 + 성터 경험치 ×0.93(6회: 0.92=20.56h·0.95=19.65h, 1→30 10.4h). v5 기록은 save.js V5_PROGRESSION(175)으로 검사 후 비율 변환
+  progression: { coefficient: 176, exponent: 2.15, early: { untilLevel: 22, startFactor: 0.04, power: 2.5 }, maxLevel: 50, late: { fromLevel: 40, factor: 1.33 }, deathLoss: 0.05, lowLevelGap: 5, lowLevelRate: 0.3 }, // 9차: 155→175. 10차: 새 무기 계열·세트·장비 판매로 빨라진 만큼 175→176 + 성터 경험치 ×0.93(6회: 0.92=20.56h·0.95=19.65h, 1→30 10.4h). v5 기록은 save.js V5_PROGRESSION(175)으로 검사 후 비율 변환
   knight: { baseHp: 80, hpPerLevel: 16, atkDivisor: 2, defDivisor: 4, attackMs: 750, regenBase: 2, regenDivisor: 4, regenMs: 3000 },
   combat: { playerHit: 0.8, monsterHit: 0.7, levelHit: 0.03, minHit: 0.3, maxHit: 0.95, minDamage: 1, weaponEnchantDamage: 2, monsterDefDivisor: 2, monsterAttackMs: 1200, bareMin: 1, bareMax: 1, critMult: 1.5, maxReduce: 0.6 },
   weapons, armors, consumables, monsters,
@@ -241,6 +270,7 @@ export default {
     { id: 'forest', name: '그늘 숲', recommendedLevel: { min: 8, max: 14 } },
     { id: 'mine', name: '잿돌 폐광', recommendedLevel: { min: 15, max: 29 } },
     { id: 'ruin', name: '망자의 성터', recommendedLevel: { min: 30, max: 40 } },
+    { id: 'frost', name: '서리 봉우리', recommendedLevel: { min: 41, max: 50 } }, // 21차
   ],
   town: { id: 'town', name: '바람 마을', x: 0, y: 0 },
   enchant: {
@@ -268,6 +298,9 @@ export default {
     { level: 30, gold: 0, items: [{ id: 'potionHigh', count: 30 }, { id: 'weaponScroll', count: 3 }, { id: 'armorScroll', count: 3 }] },
     { level: 35, gold: 0, items: [{ id: 'potionHigh', count: 40 }, { id: 'shirt4', count: 1 }] },
     { level: 40, gold: 10000, items: [{ id: 'potionHigh', count: 50 }, { id: 'weaponScroll', count: 5 }, { id: 'armorScroll', count: 5 }] },
+    // 21차 [가정]
+    { level: 45, gold: 0, items: [{ id: 'potionSuper', count: 30 }, { id: 'helm5', count: 1 }] },
+    { level: 50, gold: 30000, items: [{ id: 'potionSuper', count: 50 }, { id: 'weaponScroll', count: 5 }, { id: 'armorScroll', count: 5 }] },
   ],
   start: { gold: 200, weapon: 'woodSword', armor: 'clothArmor', items: [{ id: 'potion', count: 30 }, { id: 'returnScroll', count: 3 }] },
   // 보스: 재등장은 실제 시각, 방 이탈 초기화·땅 울림은 게임 시각(멈추면 안 흐름)
@@ -278,6 +311,7 @@ export default {
     { id: 'forest', name: '그늘 숲 입구', price: 40 },
     { id: 'mine', name: '잿돌 폐광 입구', price: 100 },
     { id: 'ruin', name: '망자의 성터 입구', price: 200 },
+    { id: 'frost', name: '서리 봉우리 입구', price: 300 }, // 21차
   ],
   autohunt: { radiusTiles: 8, stuckSec: 3, potionHp: 0.5, returnHp: 0.2, pickupNearTiles: 1.5, guardHp: 0.7, stunHpRatio: 0.4, healHp: 0.45, blockHp: 0.8, ultHits: 3, ultStrongRatio: 0.5 },
   // 5차 스킬(마나 없음, 레벨이 되면 배움, 쿨타임은 게임 시계·저장 안 함). 9차: 10개 + 패시브 5개.
@@ -304,9 +338,9 @@ export default {
     { id: 'p_will', name: '불굴', level: 38, lowHpReduce: 0.2, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -20%' },
   ],
   // 9차 단축 칸에 넣을 수 있는 물건
-  hotbarItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll'],
+  hotbarItems: ['potion', 'potionMid', 'potionHigh', 'potionSuper', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll'],
   // 13차 자동 보충: 마을에 들어오면 목표 개수까지 사는 물건(순서 = 돈이 모자랄 때 먼저 사는 순서)과 목표 단계
-  restockItems: ['potion', 'potionMid', 'potionHigh', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll', 'weaponScroll', 'armorScroll'],
+  restockItems: ['potion', 'potionMid', 'potionHigh', 'potionSuper', 'returnScroll', 'powerPotion', 'hastePotion', 'guardPotion', 'expScroll', 'huntScroll', 'morphScroll', 'weaponScroll', 'armorScroll'],
   restockSteps: [0, 5, 10, 20, 30, 50, 100, 200, 300, 500, 999],
   // 14차 스킬 레벨(1~maxLv): 올릴 때 그 스킬 카드 cards[L−1]장 + 돈 gold[L−1]. 효과는 skills.skillAt [가정]
   skillGrades: SKILL_GRADES, gradeOrder: GRADE_ORDER, gradeNames: { common: '일반', uncommon: '고급', rare: '희귀', hero: '영웅' },
@@ -349,6 +383,7 @@ export default {
     { id: 'darkelf', name: '다크엘프', level: 22, attackPct: -12, movePct: 10, critPct: 3, tint: 0xb090e0, glow: 0xa070ff, desc: '공격 간격 −12% · 이동 +10% · 치명 +3%' },
     { id: 'deathknight', name: '데스나이트', level: 30, attackPct: -15, movePct: 10, dmgPct: 8, tint: 0xff8080, glow: 0xff4040, desc: '공격 간격 −15% · 이동 +10% · 피해 +8%' },
     { id: 'wraithking', name: '망령 기사왕', level: 38, attackPct: -18, movePct: 15, dmgPct: 10, tint: 0x9fd8ff, glow: 0x60b0ff, desc: '공격 간격 −18% · 이동 +15% · 피해 +10%' },
+    { id: 'frostknight', name: '서리 용기사', level: 45, attackPct: -20, movePct: 15, dmgPct: 12, tint: 0xd8f4ff, glow: 0x9fe8ff, desc: '공격 간격 −20% · 이동 +15% · 피해 +12%', p21: true }, // 21차
   ],
   // 11차 고급 강화: k단계 확률(1·2·3), 도착 단계가 안전을 넘으면 그 단계의 일반 확률로 성공/파괴
   blessed: { weights: [50, 30, 20], weaponScroll: 'weaponScrollB', armorScroll: 'armorScrollB' },
@@ -358,6 +393,7 @@ export default {
     { tier: 2, name: '숲지기', stages: [[3, { hp: 20 }], [5, { def: 2 }], [7, { dmg: 2, crit: 3 }]] },
     { tier: 3, name: '광부', stages: [[3, { hp: 30 }], [5, { def: 3 }], [7, { dmg: 3, crit: 4 }]] },
     { tier: 4, name: '미스릴 기사', stages: [[3, { hp: 45 }], [5, { def: 4 }], [7, { dmg: 4, crit: 5 }]] },
+    { tier: 5, name: '서리 기사', stages: [[3, { hp: 60 }], [5, { def: 5 }], [7, { dmg: 5, crit: 6 }]] }, // 21차
   ],
   // 12차 도감·칭호·사냥 목표판(위 CODEX·TITLES·QUEST)
   codex: CODEX,

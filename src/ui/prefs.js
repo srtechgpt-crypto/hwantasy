@@ -5,7 +5,7 @@ const KEY = 'hwantasy.ui';
 // 16차: cycle = 자동 순환(자동 귀환 뒤 채우고 다시 사냥)
 // 17차: fav = 즐겨찾기 사냥터 입구(id) 또는 null
 const DEFAULTS = { zoom: 0, mini: true, page: 0, calm: false, cycle: false, fav: null };
-const FAVS = ['field', 'forest', 'mine', 'ruin'];
+const FAVS = ['field', 'forest', 'mine', 'ruin', 'frost']; // 21차
 
 export function loadPrefs() {
   try {

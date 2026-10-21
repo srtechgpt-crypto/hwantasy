@@ -43,7 +43,7 @@ const UNREACH_MS = 20000;     // 5차: 길이 없는 몬스터는 이 시간 동
 const ROAM_MS = 8000;         // 5차: 돌아다니기 목표 하나에 쓰는 최대 시간
 const NUDGE = 6;              // 5차: 조이스틱이 모서리에 걸리면 옆으로 이만큼(px) 안에 빈 곳을 찾아 미끄러진다
 // 9차: 단축 칸 물건 짧은 이름, 방어 스킬 글자 색, 8방향 → 각도(대지 가르기 방향)
-const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', returnScroll: '귀환', powerPotion: '힘', hastePotion: '날쌤', guardPotion: '수호', expScroll: '경험', huntScroll: '이동', morphScroll: '변신' };
+const ITEM_SHORT = { potion: '초급', potionMid: '중급', potionHigh: '고급', potionSuper: '최고', returnScroll: '귀환', powerPotion: '힘', hastePotion: '날쌤', guardPotion: '수호', expScroll: '경험', huntScroll: '이동', morphScroll: '변신' };
 const DEF_COLOR = { block: '#9fd8ff', heal: '#7dff9a', guard: '#9fd8ff', counter: '#ff7a6a' };
 const FACE_ANGLE = { right: 0, downRight: Math.PI / 4, down: Math.PI / 2, downLeft: (3 * Math.PI) / 4, left: Math.PI, upLeft: (-3 * Math.PI) / 4, up: -Math.PI / 2, upRight: -Math.PI / 4 };
 const MAX_FLOATS = 30; // ⑤ #19: 떠오르는 글자 상한
@@ -53,18 +53,20 @@ const MON_KEYS = {
   raccoon: 'm_raccoon', vine: 'm_vine', nightwing: 'm_nightwing',
   crab: 'm_crab', ember: 'm_ember', stalker: 'm_stalker', boss: 'm_boss',
   wisp: 'm_wisp', skull: 'm_skull', warden: 'm_warden', eye: 'm_eye', lich: 'm_lich',
+  frostjelly: 'm_frostjelly', icesprite: 'm_icesprite', frostbeetle: 'm_frostbeetle', blizzsnake: 'm_blizzsnake', drake: 'm_drake', // 21차
 };
-const MON_FRAME = { lich: 48 }; // 그림 한 칸 크기(없으면 16). 기사왕은 PixelLab 48×48 칸
+const MON_FRAME = { lich: 48, drake: 64 }; // 그림 한 칸 크기(없으면 16). 기사왕은 PixelLab 48×48 칸, 서리 용은 64×64 칸(발끝 = 칸 바닥)
 // 먼저 덤비는 몬스터. 4차 성터 몬스터는 공격이 세서(한 마리씩 싸우는 시뮬레이터 기준으로 맞춤) 먼저 덤비지 않고, 때리면 반격한다
 const AGGRESSIVE = new Set(['hopfrog', 'goblin', 'raccoon', 'vine', 'nightwing', 'crab', 'ember', 'stalker']);
 // 8차: 모든 아이템 아이콘(부위 장비 28종·물약 3종 포함)
 const ICON_IDS = [...bal.weapons, ...bal.armors, ...bal.consumables].map((d) => d.id);
-const SWORD_TINT = { woodSword: 0xd09a62, ironSword: 0xffffff, steelSword: 0xc4ecff, deepSword: 0xc89cff, mithrilSword: 0xd8f4ff, wraithSword: 0xb08cff };
+const SWORD_TINT = { woodSword: 0xd09a62, ironSword: 0xffffff, steelSword: 0xc4ecff, deepSword: 0xc89cff, mithrilSword: 0xd8f4ff, wraithSword: 0xb08cff, frostSword: 0xbfeeff, drakeSword: 0x8ff0e6 };
 const BOSS_REACH = 12; // 보스는 몸이 커서 공격이 조금 더 멀리서 닿는다
 // 보스별 모양·문구(id = 보스 몬스터 id = 보스 방 id)
 const BOSS_LOOK = {
   boss: { scale: 2, origin: 0.8, tint: 0xffb0a0, label: '#ffb08a', wake: '폐광 깊은 곳에서 큰울림이 깨어났습니다', awake: '큰울림이 깨어 있다', killed: '큰울림을 쓰러뜨렸다!' },
   lich: { scale: 1.1, origin: 0.83, tint: 0xffffff, label: '#c9a8ff', wake: '성터 깊은 곳에서 망령 기사왕이 깨어났습니다', awake: '기사왕이 깨어 있다', killed: '망령 기사왕을 쓰러뜨렸다!' },
+  drake: { scale: 1.15, origin: 0.97, tint: 0xffffff, label: '#9fe8ff', wake: '서리 봉우리 꼭대기에서 서리 용이 깨어났습니다', awake: '서리 용이 깨어 있다', killed: '서리 용을 쓰러뜨렸다!' }, // 21차
 };
 
 const monDef = (id) => bal.monsters.find((m) => m.id === id);

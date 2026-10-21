@@ -3,7 +3,7 @@
 import bal from '../../data/balance.js';
 import { REGIONS, ZONES, NPCS, BOSS_ROOMS, TELEPORTS, TILE } from '../../data/maps.js';
 
-const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55', ruin: '#5e5068' };
+const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55', ruin: '#5e5068', frost: '#cfe3f0' }; // 21차 서리 봉우리
 const WALL = 'rgba(12,14,22,0.85)';
 const FONT = "bold %dpx system-ui, 'Malgun Gothic', sans-serif";
 // 지도(wmap)는 buildWorld()가 매번 같은 모양으로 만들고 게임 장면도 하나라 지역·칸 크기만 키로 캐시한다

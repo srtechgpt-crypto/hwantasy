@@ -2,7 +2,7 @@
 // 바닥(벽·땅·출구·보스 방)은 지역이 바뀔 때 따로 만든 그림에 한 번 그리고,
 // 점(나·몬스터·마을 사람)은 그 바닥 그림을 복사한 위에 다시 그린다(잔상 없음).
 const PX = 2;
-const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55', ruin: '#5e5068' };
+const GROUND = { town: '#b89a6a', field: '#4f8a3e', forest: '#2e5e36', mine: '#6a5d55', ruin: '#5e5068', frost: '#cfe3f0' }; // 21차 서리 봉우리
 const WALL = 'rgba(12,14,22,0.85)';
 
 // 7차: 누르면 큰 지도(onTap). 숨기기·보이기는 큰 지도 창의 버튼이 setOpen으로 한다(숨기면 상자 전체가 사라짐)

@@ -3,7 +3,12 @@ import { passiveMods } from './skills.js';
 
 export function needExp(level, bal) {
   assertLevel(level, bal);
-  return Math.round(bal.progression.coefficient * level ** bal.progression.exponent * earlyFactor(level, bal));
+  return Math.round(bal.progression.coefficient * level ** bal.progression.exponent * earlyFactor(level, bal) * lateFactor(level, bal));
+}
+// 21차: late.fromLevel 레벨부터 필요 경험치 × late.factor(서리 봉우리 구간 길이 조절 — 그 아래 레벨은 그대로)
+export function lateFactor(level, bal) {
+  const l = bal.progression.late;
+  return l && level >= l.fromLevel ? l.factor : 1;
 }
 // 초반 레벨은 필요 경험치를 줄여 빨리 오르게 한다: 1레벨 startFactor배 → untilLevel부터 1배.
 // power가 클수록 초반에 오래 낮게 머물다 untilLevel 가까이에서 빠르게 1배로 올라간다(power 1 = 직선)
