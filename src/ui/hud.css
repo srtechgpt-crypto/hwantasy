@@ -49,6 +49,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .leftcol { position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); top: var(--log-top, calc(env(safe-area-inset-top, 0px) + 34px)); max-width: 46vw; pointer-events: none; }
 .leftcol * { pointer-events: none !important; }
 .leftcol .log { position: static; max-width: none; }
+.leftcol .quest { pointer-events: auto !important; cursor: pointer; -webkit-tap-highlight-color: transparent; } /* 22차: 목표판만 누름 받음(로그는 통과) */
+.leftcol .quest:active { background: rgba(40, 52, 34, 0.9); }
+.quest .qgoal .qgo { margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #9fe870; color: #14200c; font-size: 10px; font-weight: 800; line-height: 15px; }
+.quest .qgoal .qgo.here { background: rgba(159, 232, 112, 0.22); color: #9fe870; }
 /* 12차 사냥 목표판: 2줄 고정(알림 줄이 늘어도 판이 흔들리지 않게 판이 위), 긴 이름은 말줄임 */
 .quest { display: inline-block; max-width: 42vw; margin-bottom: 4px; padding: 3px 8px 3px 6px; border-left: 3px solid #9fe870; background: rgba(20, 22, 31, 0.84); border-radius: 0 6px 6px 0; font-size: 12px; line-height: 1.45; text-shadow: 0 1px 2px #000; }
 .quest[hidden] { display: none; }

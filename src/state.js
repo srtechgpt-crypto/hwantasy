@@ -110,7 +110,7 @@ export const hud = {
     if (!el) return;
     el.hidden = !q;
     if (!q) return;
-    const goal = `<b>목표</b><span class="qmon">${q.mon}</span><span class="qbar"><i style="width:${Math.round((100 * q.n) / q.need)}%"></i></span><span class="qn">${q.n}/${q.need}</span>${q.first ? '<em>첫 보상</em>' : ''}`;
+    const goal = `<b>목표</b><span class="qmon">${q.mon}</span><span class="qbar"><i style="width:${Math.round((100 * q.n) / q.need)}%"></i></span><span class="qn">${q.n}/${q.need}</span>${q.first ? '<em>첫 보상</em>' : ''}${!q.go ? '' : q.go.here ? '<span class="qgo here">사냥터</span>' : `<span class="qgo">➜ ${q.go.cost ? `${q.go.cost.toLocaleString('ko-KR')}원` : '가기'}</span>`}`;
     const rec = `이번 사냥 처치 ${q.kills.toLocaleString('ko-KR')} · 경험치 +${q.exp.toFixed(2)}% · 돈 +${q.gold.toLocaleString('ko-KR')}${q.items ? ` · 물건 ${q.items}` : ''}`;
     const g = $('questGoal'), r = $('questRec');
     if (g.dataset.v !== goal) { g.dataset.v = goal; g.innerHTML = goal; }

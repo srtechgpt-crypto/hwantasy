@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "d8579a6b2694";
+const VERSION = "1c39073ed5d4";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -237,7 +237,7 @@ const FILES = {
   "assets/ult_sword.png": "0f63c5f80c169f8812fd6805ec39b71c382adce7794822e7117cdc534e783519",
   "assets/출처.txt": "a98814b7064d1c9728acbf7de1e80c03da8faf0b1c1bf635b8fd3a75ce59537b",
   "data/balance.js": "33a467a241eb94e8cbbb7041b96492bc00aa6768c6b05b07379a8e05a826b24f",
-  "data/estimate.js": "f53b5b98d3b0c53ce89be0080fdae149994a87f2f7567cbbbee966ad7dad27d3",
+  "data/estimate.js": "a1628faee72356c4f97a333d72601e35952636c8793f1aaa8d6a6fd74c4b9c0a",
   "data/maps.js": "51b0a4aa8afe9f50b07ca3d3e7905033a93143c800d9895be8bc262c2bf1b457",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
@@ -247,7 +247,7 @@ const FILES = {
   "src/domain/autohunt.js": "250bf3c18b42bb778322f712898a4174f2564a440fa0b621aa9ea1f9af708cc4",
   "src/domain/boss.js": "91dafb0d88f42a8995c02ae5051e652521bc732ccc0991a8dd009bdde616e599",
   "src/domain/buffs.js": "25f969d5bf60eb4c2af88bd31d4e0b935b5bccd8d1a799104af33dcc68df84c8",
-  "src/domain/collect.js": "90a2f692654f5fb75cb7c3b95ab06c5c002bfea0399799e85b9c447ee122354e",
+  "src/domain/collect.js": "e3451154ed6b6cb70f78f4ed895666c4c9385763b38606936656cfd961d30286",
   "src/domain/combat.js": "487c84069c110834aeeb3dbda1e1cb228ea4a04945007122cf769b77d8243bd4",
   "src/domain/common.js": "d85a68f7d6d2ed787534b91f5768579bde023a02139f7276c4201fd761da017b",
   "src/domain/compare.js": "b73e5b89c932fc0acfa4de5853ec45424012024268f3d4fe99240aa4c9c39725",
@@ -263,16 +263,16 @@ const FILES = {
   "src/domain/rng.js": "bc81a7f7bebb527ce7ac3bd95485b408897f0378a5ab6effca64446e84f2ac88",
   "src/domain/save.js": "2a9dc37a0c8347fcd69b96e55278e03928b8d8a266a0643448d0d1c8f158ffe1",
   "src/domain/skills.js": "b132093eeeb44ade6b6a337a2e4fa145af89f1d8152a731b8b8aed42d7f547e5",
-  "src/main.js": "78a0a4940ad04faadc5269bc400f83cd85deb166a492cc200aedd1de8900895e",
-  "src/scenes/World.js": "6b316deab6d5d8efb77e3988fd08f93db65717010d733df4758acc375870b588",
-  "src/state.js": "1059e9b680cc6a55a7d2518f9bfaf68cadada98f0c8ebda3df858ae5eaa87452",
+  "src/main.js": "a3d8311362ebac37b9915c666b548e5a91dd87685513427edacb218a7f907eeb",
+  "src/scenes/World.js": "725af37c23192d234190e1446f5fa552b7dd0677efb722735a4d416313569219",
+  "src/state.js": "9006be7df35f308381e9b109d9e547dbd06626b8d53e1abd9ccfa74c17163223",
   "src/ui/format.js": "3e21f5a6a31fc215b975bea062039e46d6577bc144574bb8f86ce3dd45c456f7",
-  "src/ui/hud.css": "0a11301edc868609bd44fe5637d376fd7022a90329c227f2f6fad662894f09ef",
+  "src/ui/hud.css": "085d2f44d5fd90f490f72d8a89c69db1e870f16b482155f1ebe4b288ab66e30d",
   "src/ui/joystick.js": "2ae2f192bd005a5bb140c03a67ad5b401c2b3f7c474d6293a33ddccb8937158c",
   "src/ui/minimap.js": "fb1e196361c8afd9b76da6af053c5c3416237a5f71d537867a45c8c513270a45",
   "src/ui/prefs.js": "bb92e4b435b88bff8449aad908b60c82f8a10e5adb2c7375e040e9e2cc0160f7",
   "src/ui/skillfx.js": "61e18be85fa38b398c81a913d067a519db5d5cbd325c3639aa242f51cc7a3fd5",
-  "src/ui/windows.js": "17b8e732442fca1807e824b8d24f2b50330bea557b21d8b62ae6c941c5353117",
+  "src/ui/windows.js": "fb66b6903295381bd835aefd01fd09e0389daa51ed087c404925a59a9ba826c3",
   "src/ui/worldmap.js": "e29a3d789f20b6dfbd18651f8c9eb34e51fe1062db84b17322a2b0b763f7ac02",
   "vendor/phaser.min.js": "e92ddef111ba42e92d316979c732311757093688ea1810591cb7aa2858eba7a7"
 };

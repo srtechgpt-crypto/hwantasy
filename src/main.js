@@ -126,6 +126,8 @@ $('btnFav').onclick = () => {
   G.ui.goFav(fav);
 };
 $('hudRate').onclick = openRates;
+// 22차: 목표판을 누르면 목표 사냥터로 순간이동(메뉴·창이 열려 게임이 멈췄거나 저장 대기 중이면 무시. 반쪽 가방은 멈춤이 아니라 goQuest가 닫음)
+$('quest').onclick = () => { if (G.started && !G.pending && G.pause.size === 0) G.ui.goQuest(); };
 $('btnResume').onclick = () => { $('menu').hidden = true; G.pause.delete('menu'); };
 $('btnSaveNow').onclick = () => { if (G.persist('menu')) hud.toast('저장했습니다'); };
 $('btnToTitle').onclick = () => { G.ui.close(); G.persist('title'); G.scene?.leaveGame(); showTitle(); G.pause.delete('menu'); };

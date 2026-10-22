@@ -821,8 +821,11 @@ export class WorldScene extends Phaser.Scene {
   questBoard() {
     const s = G.save, q = s.quest, r = this.rec;
     if (!q || !r) return null;
+    // 22차: 누르면 갈 사냥터 — 이미 그 지역이면 here, 아니면 지금 위치 기준 순간이동 값(⑤ #5: 누르기 전에 값이 보이게)
+    const dest = col.questMapId(s, bal), here = dest !== null && mapIdAt(this.knight.x) === dest;
+    const go = dest === null ? null : here ? { here: true } : { cost: inv.mapTeleportCost({ ...s, player: { ...s.player, map: mapIdAt(this.knight.x) } }, dest, bal) };
     return {
-      mon: monName(q.id), n: q.n, need: col.questCount(q.id, bal), first: !q.done.includes(q.id),
+      go, mon: monName(q.id), n: q.n, need: col.questCount(q.id, bal), first: !q.done.includes(q.id),
       kills: r.kills, exp: r.exp * 100, gold: r.gold, items: r.items,
     };
   }

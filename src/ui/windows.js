@@ -1596,10 +1596,18 @@ export function initWindows() {
 
   // 17차: 메뉴 [★ 즐겨찾기로] — 지도 그 지역 탭을 열고 순간이동 버튼과 같은 거래
   function goFav(id) { open('map', { tab: id }); act('maptele', { id }); }
+  // 22차: 목표판 누름 — 목표 몬스터 사냥터로 즐겨찾기와 같은 거래. 이미 그 지역이면 돈 안 씀
+  function goQuest() {
+    const id = col.questMapId(G.save, bal), t = id && bal.teleport.find((x) => x.id === id);
+    if (!t) return;
+    if (cur?.half) close();
+    if (G.scene?.knight && mapIdAt(G.scene.knight.x) === id) { hud.toast(`이미 ${REGIONS.find((r) => r.id === id)?.name ?? t.name}에 있습니다`, 1800); return; }
+    goFav(id);
+  }
   // ⑤ #3: 메뉴 버튼에 미리 값 표시(지금 위치 기준)
   function favCost(id) {
     const s = G.save, here = { ...s, player: { ...s.player, map: G.scene?.knight ? mapIdAt(G.scene.knight.x) : s.player.map } };
     return inv.mapTeleportCost(here, id, bal);
   }
-  return { open, close, unbusy, refresh: render, goFav, favCost, get isOpen() { return !!cur; } };
+  return { open, close, unbusy, refresh: render, goFav, goQuest, favCost, get isOpen() { return !!cur; } };
 }

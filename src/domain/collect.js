@@ -10,6 +10,8 @@ export const titleDef = (id, bal) => (bal.titles ?? []).find(t => t.id === id) ?
 export const normalMonsters = bal => bal.monsters.filter(m => !m.isBoss).sort((a, b) => a.level - b.level);
 const monDef = (id, bal) => bal.monsters.find(m => m.id === id) ?? null;
 export const questCount = (monId, bal) => bal.quest.count[monDef(monId, bal)?.mapId] ?? 0;
+// 22차: 목표판을 누르면 갈 사냥터(목표 몬스터가 사는 지역 id, 없으면 null)
+export const questMapId = (save, bal) => monDef(save?.quest?.id, bal)?.mapId ?? null;
 export const killsMax = bal => bal.quest?.killsMax ?? 1e12;
 
 // ---------- 검사 ----------
