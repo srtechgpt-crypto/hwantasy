@@ -21,6 +21,7 @@ import { phaseAt } from '../domain/daynight.js';
 import { applyBuffs, scrollExpPct, tickBuffs, buffDef, buffOfItem } from '../domain/buffs.js';
 import * as col from '../domain/collect.js';
 import { createJoystick } from '../ui/joystick.js';
+import { fmtGold } from '../ui/format.js';
 import { createMinimap } from '../ui/minimap.js';
 import { loadPrefs, savePrefs } from '../ui/prefs.js';
 import { G, hud, josa } from '../state.js';
@@ -381,6 +382,7 @@ export class WorldScene extends Phaser.Scene {
     this.titleLook();
     this.region = mapIdAt(this.knight.x);
     this.restockDue = this.region === 'town'; // 13차: 마을에서 이어하면 한 번
+    this.giftDue = true; // 23차: 들어올 때마다 안 받은 선물을 한 번 확인
     this.playing = true;
     hud.log(isNew ? '바람 마을에 도착했습니다. 마을 사람들에게 다가가 [대화]를 눌러 보세요.' : `다시 오셨습니다. Lv ${p.level} 기사`);
     this.refreshHud(true);
@@ -610,6 +612,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateNight();
     this.updateRegion();
     if (this.restockDue) { this.tryRestock(); if (G.pending) return; } // ⑤ #10: 저장 실패로 대기가 생기면 이 프레임은 여기서 끝
+    if (this.giftDue) { this.tryGift(); if (G.pending) return; }
     if (this.cycle) { this.tickCycle(now, v.active); if (G.pending) return; }
     this.tickRegen(dt);
 
@@ -656,6 +659,25 @@ export class WorldScene extends Phaser.Scene {
         const msg = `자동 보충 · ${text} (−${res.cost.toLocaleString('ko-KR')}원)${res.short ? ' · 돈·가방이 모자라 일부만' : ''}`;
         hud.toast(msg, 3200); hud.log(msg);
         this.refreshHud(true); this.refreshSkills(true); G.ui?.refresh();
+      },
+    });
+  }
+
+  // 23차 선물: 들어온 뒤 한 번만 시도(⑤ #5 — 실패해도 매 프레임 반복하지 않음, 다음에 들어올 때 다시).
+  // 저장에 성공했을 때만 돈·받은 기록이 함께 확정된다(G.commit). 저장 실패 → [다시 시도]/[그만두기](그만두면 다음 입장 때 다시)
+  tryGift() {
+    if (G.pending || G.lockedByOtherTab) return false;
+    this.giftDue = false;
+    if (!inv.pendingGifts(G.save, bal).length) return false;
+    const res = inv.claimGifts(G.save, bal);
+    if (!res.ok) { hud.toast(`선물을 받지 못했습니다 · ${res.reason}`, 3000); return false; }
+    return G.commit(res.save, 'gift', {
+      after: () => {
+        for (const g of res.got) {
+          const msg = `🎁 ${g.text} 도착 · ${fmtGold(g.gold)}원`;
+          hud.toast(msg, 4500); hud.log(msg);
+        }
+        this.refreshHud(true); G.ui?.refresh();
       },
     });
   }
@@ -972,10 +994,13 @@ export class WorldScene extends Phaser.Scene {
   // fixed: 회오리처럼 여러 마리를 칠 때 쓰는 순간의 능력치·레벨({stats, level})로 고정(중간 레벨업 영향 없음)
   strike(m, mult = 1, color = '#ffffff', fixed = null) {
     this.face = dirOf(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y);
-    const r = combat.playerAttack(fixed?.stats ?? this.stats(), m.def, fixed?.level ?? G.save.player.level, this.rng, bal, { mult });
+    const st = fixed?.stats ?? this.stats();
+    const r = combat.playerAttack(st, m.def, fixed?.level ?? G.save.player.level, this.rng, bal, { mult });
     m.aggro = true;
     if (!r.hit) { this.floatText(m.sprite.x, m.sprite.y - 14, 'MISS', '#c9c2b0'); return r; }
+    const dealt = Math.min(r.dmg, Math.max(0, m.hp)); // ⑤ #7: 흡혈은 실제로 깎은 체력만큼
     m.hp -= r.dmg;
+    if (st.stealPct > 0) this.lifeSteal(Math.floor((dealt * st.stealPct) / 100));
     m.hurtAt = this.gt;
     if (!m.def.isBoss) this.knockback(m); else this.flashWhite(m);
     // 9차: 치명타는 큰 빨간 글자
@@ -983,6 +1008,16 @@ export class WorldScene extends Phaser.Scene {
     else this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(r.dmg), color);
     if (m.hp <= 0) (m.def.isBoss ? this.killBoss(m) : this.killMonster(m));
     return r;
+  }
+
+  // 23차 흡혈(영웅·전설 검·창): 최대 체력까지만, 쓰러진 뒤엔 안 함
+  lifeSteal(heal) {
+    const p = G.save.player;
+    if (heal < 1 || p.hp <= 0) return;
+    const max = this.stats().maxHp, add = Math.min(heal, max - p.hp);
+    if (add < 1) return;
+    p.hp += add;
+    this.floatText(this.knight.x, this.knight.y - 30, `+${add}`, '#7dff9a');
   }
 
   // ---------- 스킬(5차 → 9차: 액티브 10개·단축 칸) ----------
@@ -1368,9 +1403,13 @@ export class WorldScene extends Phaser.Scene {
       : this.add.image(x, y, `ic_${id}`).setScale(0.75);
     sprite.setDepth(9);
     // 10차: 희귀는 땅에서 반짝임(크기 숨쉬기) + 알림
-    if (kind === 'item' && bal.armors.concat(bal.weapons).find((d) => d.id === id)?.rare) {
+    const gd = kind === 'item' ? bal.armors.concat(bal.weapons).find((d) => d.id === id) : null;
+    if (gd?.rare || gd?.rank) {
       this.tweens.add({ targets: sprite, scale: { from: 0.75, to: 0.95 }, duration: 520, yoyo: true, repeat: -1, delay: 280 });
-      hud.toast(`희귀 장비 ${nameOf(id)}이(가) 떨어졌습니다!`, 2600);
+      // 23차: 영웅(보라)·전설(주황) 장비는 더 크게 알림
+      const label = gd.rank === 'legend' ? '전설' : gd.rank === 'hero' ? '영웅' : '희귀';
+      hud.toast(`${gd.rank ? '✨ ' : ''}${label} 장비 ${nameOf(id)}이(가) 떨어졌습니다!`, gd.rank ? 4000 : 2600);
+      if (gd.rank) { sprite.setTint(gd.rank === 'legend' ? 0xffb050 : 0xd090ff); hud.log(`${label} 장비 ${nameOf(id)}이(가) 떨어졌습니다!`); }
     }
     this.tweens.add({ targets: sprite, x: tx, duration: 260, ease: 'Linear' });
     this.tweens.add({ targets: sprite, y: { from: y - 2, to: ty }, duration: 260, ease: 'Bounce.easeOut' });

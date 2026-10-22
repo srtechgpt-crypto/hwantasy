@@ -412,6 +412,22 @@ export function setTitle(save, id, bal) {
   });
 }
 
+// ---------- 23차 선물 ----------
+// 안 받은 선물 목록(받은 id는 save.gifts). 선물 기록이 없는 기록(옛 버전에서 넘어옴)은 모든 선물을 받을 수 있다
+export const pendingGifts = (save, bal) => (bal.gifts ?? []).filter(g => !(save.gifts ?? []).includes(g.id));
+// 안 받은 선물을 한 거래로 모두 받는다(돈 한도를 넘으면 아무것도 안 받음). 반환 save + got(받은 선물)
+export function claimGifts(save, bal) {
+  return transaction(save, bal, next => {
+    const got = pendingGifts(next, bal);
+    if (!got.length) return fail('받을 선물이 없습니다');
+    const gold = got.reduce((sum, g) => sum + g.gold, 0);
+    if (!integer(gold) || !integer(next.player.gold + gold)) return fail('돈 한도를 초과했습니다');
+    next.player.gold += gold;
+    next.gifts = [...(next.gifts ?? []), ...got.map(g => g.id)];
+    return { ok: true, save: next, got, gold };
+  });
+}
+
 // ---------- 13차 「편하게」 ----------
 const LOCKED_SELL = '잠긴 장비는 팔 수 없습니다. 가방에서 잠금을 풀어 주세요';
 // 장비 잠금: 가방·창고 어디 있든 켜고 끈다(끄면 필드를 지움). 팔기·도감·강화는 각 함수가 막는다

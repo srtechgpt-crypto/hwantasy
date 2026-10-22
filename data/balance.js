@@ -72,6 +72,14 @@ const ACC_PRICE = [400, 2000, 9000, 60000, 750000];
 armors.push(...ACCS.flatMap(([slot, noun, tiers, fx]) => tiers.map((pre, t) => ({
   id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, acc: true, tier: t + 1, def: 0, ...fx(t), price: ACC_PRICE[t], shop: true, sellRate: 0.25, p18: true, ...(t === 4 ? { p21: true } : {}),
 }))));
+// 23차 장신구 2칸(귀걸이·팔찌): 18차 장신구와 같은 규칙, p23 = 23차 아이템(v15 이하 기록에는 없음) [가정]
+const ACCS23 = [
+  ['ear', '귀걸이', ['구리', '은', '금', '미스릴', '서리'], t => ({ hit: [1, 2, 3, 4, 5][t], hp: [10, 20, 30, 50, 70][t] })],
+  ['wrist', '팔찌', ['가죽', '은', '금', '미스릴', '서리'], t => ({ def: [1, 1, 2, 3, 4][t], dmg: [0, 1, 1, 2, 3][t] })],
+];
+armors.push(...ACCS23.flatMap(([slot, noun, tiers, fx]) => tiers.map((pre, t) => ({
+  id: `${slot}${t + 1}`, name: `${pre} ${noun}`, kind: 'armor', slot, acc: true, tier: t + 1, def: 0, ...fx(t), price: ACC_PRICE[t], shop: true, sellRate: 0.25, p23: true,
+}))));
 const consumables = [
   { id: 'potion', name: '초급 회복 물약', kind: 'consumable', price: 10, heal: 30, cooldownMs: 1000, shop: true, sellRate: 0.25 },
   { id: 'potionMid', name: '중급 회복 물약', kind: 'consumable', price: 40, heal: 90, cooldownMs: 1000, shop: true, sellRate: 0.25 },
@@ -126,6 +134,28 @@ armors.push(...rareArmors);
 export const RARE_POOLS = [1, 2, 3, 4, 5].map(t => [...rareWeapons, ...rareArmors].filter(d => d.tier === t).map(d => d.id));
 // 새 무기 계열(검·희귀 제외) 등급별 목록 — 일반 몬스터 드랍
 const TYPE_POOLS = [1, 2, 3, 4, 5].map(t => weapons.filter(d => d.tier === t && d.type !== 'sword' && !d.rare).map(d => d.id));
+// 23차 영웅·전설 장비: 4·5등급(미스릴·서리강) 무기 5계열 + 큰 갑옷의 보스 전용판(id `<원래>_h`·`_l`, rank, from = 원래 id, 상점 없음).
+// 무기 최소·최대 ×1.35/×1.6 올림, 갑옷 방어 ×1.35/×1.6 올림 + 최대 체력. 특수 효과는 종류로 고정(저장은 id만): [가정]
+// 검·창 = 흡혈(stealPct, 때린 피해의 %만큼 회복), 대검·도끼 = 치명 %p(crit에 더함), 단검 = 공격 간격 −%(atkPct), 갑옷 = 최대 체력 %(hpPct)
+export const RANKS = { hero: { pre: '영웅의', mult: 1.35, price: 3, i: 0 }, legend: { pre: '전설의', mult: 1.6, price: 6, i: 1 } };
+const RANK_OPT = { sword: ['stealPct', 3, 6], spear: ['stealPct', 3, 6], twohand: ['crit', 6, 12], axe: ['crit', 6, 12], dagger: ['atkPct', 5, 10] };
+const rankOf = (d, rank) => {
+  const r = RANKS[rank], suffix = rank === 'hero' ? '_h' : '_l';
+  const head = { ...d, id: `${d.id}${suffix}`, name: `${r.pre} ${d.name}`, rank, from: d.id, shop: false, price: d.price * r.price, p23: true };
+  delete head.p21; // 5등급도 p23으로만 구분(v16에서 처음 생김)
+  if (d.kind === 'weapon') {
+    const [key, hero, legend] = RANK_OPT[d.type ?? 'sword'];
+    return { ...head, min: Math.ceil(d.min * r.mult), max: Math.ceil(d.max * r.mult), [key]: (key === 'crit' ? d.crit ?? 0 : 0) + (r.i ? legend : hero) };
+  }
+  return { ...head, def: Math.ceil(d.def * r.mult), hp: [[40, 60], [80, 120]][r.i][d.tier - 4], hpPct: r.i ? 8 : 4 };
+};
+const rankBases = [...weapons.filter(d => d.tier >= 4 && !d.rare), ...armors.filter(d => d.slot === 'armor' && d.tier >= 4 && !d.rare)];
+const rankItems = rank => rankBases.map(d => rankOf(d, rank));
+const heroItems = rankItems('hero'), legendItems = rankItems('legend');
+for (const d of [...heroItems, ...legendItems]) (d.kind === 'weapon' ? weapons : armors).push(d);
+const rankPool = (list, t) => list.filter(d => d.tier === t).map(d => d.id);
+export const HERO_POOLS = { 4: rankPool(heroItems, 4), 5: rankPool(heroItems, 5) };
+export const LEGEND_POOLS = { 4: rankPool(legendItems, 4), 5: rankPool(legendItems, 5) };
 // 일반 몬스터 드랍(지역 단계별). 4차부터 몬스터마다 드랍을 명시한다(순번으로 정하지 않음)
 // 8차: 물약 종류(지역별)·부위 장비(그 지역 등급, 부위마다 partChance)
 // 10차: pool 드랍 = 한 번 굴려 맞으면 목록 중 하나(다음 난수로 고름). 새 무기 계열(typeChance)·희귀(전체 0.002)
@@ -178,6 +208,7 @@ const rows = [
     { pool: ELIXIRS, count: 1, chance: 0.15 }, // 15차
     { id: 'dollBox', count: 1, chance: 0.1 },
     { id: 'bossCoin', count: 2, guaranteed: true }, // 19차
+    { pool: HERO_POOLS[4], count: 1, chance: 0.03 }, // 23차: 맨 끝에 붙여 앞 항목 난수 순서 그대로 [가정]
   ]],
   // 4차: 망자의 성터(권장 31~40). 10차: 미스릴 세트·희귀·새 무기로 30→40이 빨라져 경험치 ×0.93(1102·1598·2344·3380 → 아래 값)
   ['wisp', '떠도는 넋', 30, 940, 48, 40, 1025, 120, 'ruin', false, RUIN_DROPS],
@@ -196,6 +227,8 @@ const rows = [
     { pool: ELIXIRS, count: 1, chance: 0.15 }, // 15차
     { id: 'dollBox', count: 1, chance: 0.1 },
     { id: 'bossCoin', count: 4, guaranteed: true }, // 19차
+    { pool: HERO_POOLS[4], count: 1, chance: 0.08 }, // 23차 [가정]
+    { pool: LEGEND_POOLS[4], count: 1, chance: 0.02 },
   ]],
   // 21차: 서리 봉우리(권장 41~50). 시뮬레이터 3회에서 젤리 39~40 → 정령 41~42 → 갑각충 43~44 → 뱀 45~49가 차례로 주 대상이 되게 맞춤
   //      (방어가 높을수록 경험치/체력 비율을 올림). 40→50 시간은 progression.late(필요치 ×1.33)로 맞춤 [계산: 시뮬레이터]
@@ -215,6 +248,8 @@ const rows = [
     { pool: ELIXIRS, count: 1, chance: 0.2 },
     { id: 'dollBox', count: 1, chance: 0.1 },
     { id: 'bossCoin', count: 6, guaranteed: true },
+    { pool: HERO_POOLS[5], count: 1, chance: 0.08 }, // 23차 [가정]
+    { pool: LEGEND_POOLS[5], count: 1, chance: 0.02 },
   ]],
 ];
 // 5차(대표님 의견 '돈이 너무 없다'): 일반 몬스터 돈 평균 × 2.5(반올림). 보스는 그대로
@@ -399,6 +434,8 @@ export default {
   codex: CODEX,
   titles: TITLES,
   quest: QUEST,
+  // 23차 선물: 게임에 들어가면 안 받은 선물을 한 번 받는다(save.gifts에 받은 id). id는 지우거나 바꾸지 않는다. 새 게임은 모두 받은 것으로 시작
+  gifts: [{ id: 'gift23', gold: 10000000, text: '23차 기념 선물' }],
   // walkSpeed: 기사 걸음(px/초, World SPEED) — 시뮬레이터 돌진이 줄이는 걷기 시간 계산용
   simulation: { walkSpeed: 70, walkSec: 3.5, serviceSec: 60, potionStock: 200, seed: 20261011 },
 };

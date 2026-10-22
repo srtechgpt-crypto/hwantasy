@@ -80,6 +80,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
   const gear = { def: 0, hp: 0, hit: 0, dmg: 0, regen: 0 };
   let weapon = null, wdef = null;
   const defs = [];
+  let gearHpPct = 0;
   for (const slot of EQUIP_SLOTS) {
     const item = equip[slot];
     if (item === null || item === undefined) continue;
@@ -89,6 +90,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
     if (def.kind === 'weapon') { weapon = { min: def.min, max: def.max, enchant: item.enchant }; wdef = def; continue; }
     gear.def += (def.def ?? 0) + item.enchant;
     gear.hp += def.hp ?? 0; gear.hit += def.hit ?? 0; gear.dmg += def.dmg ?? 0; gear.regen += def.regen ?? 0;
+    gearHpPct += def.hpPct ?? 0; // 23차 영웅·전설 갑옷
   }
   // 10차 세트 효과는 장비 합에 더한다(최대 체력·방어·피해), 치명은 따로
   const sets = activeSets(defs, bal);
@@ -103,19 +105,21 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
   const pmHp = perm?.hp ?? 0, pmDef = perm?.def ?? 0, pmDmg = perm?.dmg ?? 0, pmHit = perm?.hit ?? 0;
   const hpBase = k.baseHp + k.hpPerLevel * (level - 1) + st.hpPerCon * con + gear.hp + pmHp;
   const atkBase = Math.round(k.attackMs * (1 - st.atkMsPerDex * dex));
+  const atkPct = pm.atkPct + (wdef?.atkPct ?? 0); // 23차: 영웅·전설 단검의 간격 −%는 패시브와 더한다
   return {
     ...a, points: bonusPoints(level, bal),
-    maxHp: Math.floor((hpBase * (100 + pm.hpPct)) / 100),
+    maxHp: Math.floor((hpBase * (100 + pm.hpPct + gearHpPct)) / 100),
     dmgBonus: Math.max(Math.floor(level / k.atkDivisor), str) + gear.dmg + pmDmg,
     def: Math.floor(level / k.defDivisor) + Math.floor(con / st.conPerDef) + gear.def + pm.def + pmDef,
     hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit + (wdef?.hit ?? 0) + pmHit,
     // 간격 = 민첩 → 패시브 → 무기 계열 순으로 곱하고 한 번 반올림(검은 speed 100이라 9차와 같은 값). 최소 간격도 무기 계열 비율
-    attackMs: Math.max(Math.round((st.minAttackMs * speed) / 100), Math.round((atkBase * (100 - pm.atkPct) * speed) / 10000)),
+    attackMs: Math.max(Math.round((st.minAttackMs * speed) / 100), Math.round((atkBase * (100 - atkPct) * speed) / 10000)),
     // ⑤ #8: 최소 간격으로 자르기 전 값 — 날쌘 물약은 이 값에 곱한 뒤 마지막에 한 번만 자른다
-    attackMsRaw: (atkBase * (100 - pm.atkPct) * speed) / 10000,
+    attackMsRaw: (atkBase * (100 - atkPct) * speed) / 10000,
     minAttackMs: Math.round((st.minAttackMs * speed) / 100),
     dmgPct: wdef?.dmgPct ?? 0,
     critPct: pm.critPct + setCrit + (wdef?.crit ?? 0), lowHpReduce: pm.lowHpReduce, lowHpRatio: pm.lowHpRatio,
+    stealPct: wdef?.stealPct ?? 0, // 23차 흡혈(때린 피해의 %, World.strike)
     regenPerTick: k.regenBase + Math.floor(level / k.regenDivisor) + Math.floor(con / st.conPerRegen) + gear.regen,
     regenMs: k.regenMs,
     weapon: weapon ?? { min: bal.combat.bareMin, max: bal.combat.bareMax, enchant: 0 },

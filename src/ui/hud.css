@@ -370,6 +370,15 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 /* 10차: 희귀 장비 — 금빛 테두리·이름 */
 .cell.rare, .row-item.rare, .slot.rare { box-shadow: inset 0 0 0 2px #e7b84a, 0 0 6px #e7b84a88; }
 .rare-t { color: #ffd36a; text-shadow: 0 0 4px #b8862a; }
+/* 23차 영웅(보라)·전설(주황) */
+.cell.hero, .row-item.hero, .slot.hero { box-shadow: inset 0 0 0 2px #b77cff, 0 0 7px #b77cffaa; }
+.cell.legend, .row-item.legend, .slot.legend { box-shadow: inset 0 0 0 2px #ff9a3c, 0 0 9px #ff9a3ccc; }
+.hero-t { color: #d6a8ff; text-shadow: 0 0 4px #7a3cc8; }
+.legend-t { color: #ffb45e; text-shadow: 0 0 5px #c0600a; }
+/* 23차 장신구 4칸: 인형 아래 작은 칸 한 줄 */
+.doll .accrow { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.doll .accrow .slot { width: auto; height: 52px; }
+.doll .accrow .slot .ic { width: 28px; height: 28px; }
 .typechip { font-size: 11px; color: var(--muted); margin-left: 4px; }
 .setbox { margin-top: 8px; padding: 6px 8px; border: 1px solid #5a4a2a; border-radius: 6px; background: #1e1810; font-size: 12px; }
 .setbox b { color: #ffd36a; }

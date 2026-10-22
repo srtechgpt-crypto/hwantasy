@@ -26,18 +26,24 @@ const won = (n) => n.toLocaleString('ko-KR');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const isGear = (id) => isGearDef(itemDef(id, bal));
 // 8차: 장착 칸 이름(장비 9칸)
-const SLOT_NAMES = { weapon: '무기', armor: '갑옷', helm: '투구', shirt: '티셔츠', cloak: '망토', gloves: '장갑', belt: '벨트', pants: '바지', boots: '부츠', neck: '목걸이', ring: '반지' };
+const SLOT_NAMES = { weapon: '무기', armor: '갑옷', helm: '투구', shirt: '티셔츠', cloak: '망토', gloves: '장갑', belt: '벨트', pants: '바지', boots: '부츠', neck: '목걸이', ring: '반지', ear: '귀걸이', wrist: '팔찌' };
 // 인형 배치(3×3): 망토 투구 장갑 / 무기 갑옷 티셔츠 / 벨트 바지 부츠
-// 18차: 맨 아래 줄에 장신구(목걸이·반지)
-const DOLL = ['cloak', 'helm', 'gloves', 'weapon', 'armor', 'shirt', 'belt', 'pants', 'boots', 'neck', 'ring'];
+// 18차: 맨 아래 줄에 장신구(목걸이·반지). 23차: 장신구 4칸(귀걸이·팔찌 더함)은 작은 칸 한 줄(.accrow)
+const DOLL = ['cloak', 'helm', 'gloves', 'weapon', 'armor', 'shirt', 'belt', 'pants', 'boots', 'neck', 'ring', 'ear', 'wrist'];
 // 빈 칸에 흐리게 보여 줄 그림
-const GHOST = { weapon: 'woodSword', armor: 'clothArmor', helm: 'helm1', shirt: 'shirt1', cloak: 'cloak1', gloves: 'gloves1', belt: 'belt1', pants: 'pants1', boots: 'boots1', neck: 'neck1', ring: 'ring1' };
+const GHOST = { weapon: 'woodSword', armor: 'clothArmor', helm: 'helm1', shirt: 'shirt1', cloak: 'cloak1', gloves: 'gloves1', belt: 'belt1', pants: 'pants1', boots: 'boots1', neck: 'neck1', ring: 'ring1', ear: 'ear1', wrist: 'wrist1' };
 const icon = (id, cls = '') => `<img class="ic ${cls}" src="assets/icons/${id}.png" alt="">`;
 const itemName = (it) => `${it.enchant ? `+${it.enchant} ` : ''}${itemDef(it.id, bal)?.name ?? it.id}`;
 // 10차: 희귀 장비(금빛 테두리·이름), 무기 계열 이름
 const isRare = (id) => !!itemDef(id, bal)?.rare;
-const rareCls = (id) => (isRare(id) ? 'rare' : '');
-const nameHtml = (it) => (isRare(it.id) ? `<span class="rare-t">${esc(itemName(it))}</span>` : esc(itemName(it)));
+// 23차: 영웅(보라)·전설(주황)은 rank로 — 희귀와 같은 자리에 색만 다르게
+const rankOf = (id) => itemDef(id, bal)?.rank ?? null;
+const RANK_NAME = { hero: '영웅', legend: '전설' };
+const rareCls = (id) => (rankOf(id) ?? (isRare(id) ? 'rare' : ''));
+const nameHtml = (it) => (rankOf(it.id) ? `<span class="${rankOf(it.id)}-t">${esc(itemName(it))}</span>` : isRare(it.id) ? `<span class="rare-t">${esc(itemName(it))}</span>` : esc(itemName(it)));
+const gradeTag = (d) => (d.rank ? `<b class="${d.rank}-t">${RANK_NAME[d.rank]}</b> · ` : d.rare ? '<b class="rare-t">희귀</b> · ' : '');
+// 23차 영웅·전설 특수 효과 한 줄(대검·도끼의 치명은 기존 '치명 +%'에 합쳐 보임)
+const rankFx = (d) => [d.stealPct ? `흡혈 ${d.stealPct}%(때린 피해만큼 체력 회복)` : '', d.atkPct ? `공격 간격 −${d.atkPct}%` : '', d.hpPct ? `최대 체력 +${d.hpPct}%` : ''].filter(Boolean);
 const TYPE_OF = Object.fromEntries(WEAPON_TYPES.map((t) => [t.type, t]));
 const equipped = (s, uid) => Object.values(s.equip).includes(uid);
 // 6차: 지금 낀 같은 종류 장비보다 좋으면 초록 ▲, 나쁘면 빨강 ▼(같거나 장비가 아니면 없음)
@@ -305,7 +311,8 @@ export function initWindows() {
       if (d.speedPct) extra.push(`공격 간격 ${d.speedPct > 0 ? '+' : ''}${d.speedPct}%`);
       if (d.crit) extra.push(`치명 +${d.crit}%`);
       if (d.hit) extra.push(`명중 ${d.hit > 0 ? '+' : ''}${d.hit}%`);
-      return `${d.rare ? '<b class="rare-t">희귀</b> · ' : ''}${t?.noun ?? '검'} · 공격 ${d.min}~${d.max}${it.enchant ? ` (+${it.enchant * bal.combat.weaponEnchantDamage})` : ''}${extra.length ? ` · ${extra.join(' · ')}` : ''}`;
+      extra.push(...rankFx(d));
+      return `${gradeTag(d)}${t?.noun ?? '검'} · 공격 ${d.min}~${d.max}${it.enchant ? ` (+${it.enchant * bal.combat.weaponEnchantDamage})` : ''}${extra.length ? ` · ${extra.join(' · ')}` : ''}`;
     }
     if (d.kind === 'armor') {
       const parts = [];
@@ -314,8 +321,9 @@ export function initWindows() {
       if (d.hit) parts.push(`명중 +${d.hit}%`);
       if (d.dmg) parts.push(`피해 +${d.dmg}`);
       if (d.regen) parts.push(`회복 +${d.regen}`);
+      parts.push(...rankFx(d));
       const setName = d.slot && d.slot !== 'armor' && !d.acc && d.tier ? bal.sets?.find((x) => x.tier === d.tier)?.name : null;
-      return `${d.rare ? '<b class="rare-t">희귀</b> · ' : ''}${SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}${setName ? ` · <small>${setName} 세트</small>` : ''}`;
+      return `${gradeTag(d)}${SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}${setName ? ` · <small>${setName} 세트</small>` : ''}`;
     }
     if (d.elixir) return `${STAT_NAME[d.elixir]} 영구 +1 (최대 ${bal.elixirMax}개, 지금 ${(elixirOf(G.save) ?? {})[d.elixir] ?? 0}개)`;
     if (d.dollBox) return `열면 마법인형 ${bal.dolls.length}종 중 하나(이미 있으면 ${won(bal.dollRefund)}원을 돌려받음)`;
@@ -420,8 +428,9 @@ export function initWindows() {
       rows.push(['기간', '<b>끼고 있는 동안 계속</b>(영구) — 벗으면 효과가 빠집니다']);
       if (d.kind === 'weapon') {
         const t = TYPE_OF[d.type ?? 'sword'];
-        rows.push(['종류', `${t?.noun ?? '검'} — ${t?.desc ?? ''}${d.rare ? ' · <b class="rare-t">희귀</b>(같은 등급보다 공격 ×1.25)' : ''}`]);
+        rows.push(['종류', `${t?.noun ?? '검'} — ${t?.desc ?? ''}${d.rare ? ' · <b class="rare-t">희귀</b>(같은 등급보다 공격 ×1.25)' : ''}${d.rank ? ` · <b class="${d.rank}-t">${RANK_NAME[d.rank]}</b>(보스 전용, 공격 ×${d.rank === 'legend' ? 1.6 : 1.35})` : ''}`]);
       }
+      if (d.rank) rows.push(['특수 효과', `<b class="${d.rank}-t">${rankFx(d).concat(d.kind === 'weapon' && d.crit && ['twohand', 'axe'].includes(d.type) ? [`치명 +${d.crit}%`] : []).join(' · ')}</b>${d.stealPct ? ' — 비교 ▲▼ 점수에는 흡혈이 들어가지 않습니다' : ''}`]);
       const label = wearing ? '지금 끼고 있음' : s.bag.some((i) => i.uid === s.equip[slot]) ? '바꿔 끼면' : '끼면';
       const from = wearing ? base : cur;
       rows.push([label, `${wearing ? '(이 장비를 빼면 → 끼고 있는 지금) ' : ''}공격 ${atkText(from)} → <b>${atkText(next)}</b> · 간격 ${arrowLow(from.attackMs, next.attackMs)} · 치명 ${arrow(from.critPct, next.critPct, '%')}${from.dmgPct !== next.dmgPct ? ` · 피해 % ${arrow(from.dmgPct, next.dmgPct, '%')}` : ''}`]);
@@ -690,13 +699,14 @@ export function initWindows() {
   // 장비: 인형 모양 9칸. 칸을 누르면 오른쪽에 지금 장비와 가방 속 같은 부위 장비 목록
   function viewGear(s) {
     cur.slot = cur.slot ?? 'weapon';
-    const cells = DOLL.map((sl) => {
+    const cell = (sl) => {
       const it = s.bag.find((i) => i.uid === s.equip[sl]);
       const spare = s.bag.some((i) => !equipped(s, i.uid) && slotOf(itemDef(i.id, bal)) === sl && compareGear(s, i.id, i.enchant ?? 0, bal) === 'up');
-      return `<button type="button" class="slot ${cur.slot === sl ? 'on' : ''} ${it ? '' : 'none'}" data-act="slot" data-slot="${sl}">
+      return `<button type="button" class="slot ${cur.slot === sl ? 'on' : ''} ${it ? rareCls(it.id) : 'none'}" data-act="slot" data-slot="${sl}">
         ${it ? icon(it.id) : icon(GHOST[sl], 'ghost')}${it?.enchant ? `<span class="e">+${it.enchant}</span>` : ''}${spare ? '<span class="cmp up">▲</span>' : ''}
         <small>${SLOT_NAMES[sl]}</small></button>`;
-    }).join('');
+    };
+    const cells = DOLL.slice(0, 9).map(cell).join('') + `<div class="accrow">${DOLL.slice(9).map(cell).join('')}</div>`;
     const worn = s.bag.find((i) => i.uid === s.equip[cur.slot]);
     const spares = s.bag.filter((i) => !equipped(s, i.uid) && slotOf(itemDef(i.id, bal)) === cur.slot);
     const list = spares.length ? spares.map((i) => `<div class="row-item ${rareCls(i.id)}">${icon(i.id)}<span>${nameHtml(i)}${cmpMark(s, i.id, i.enchant ?? 0)}<br><small>${itemInfo(i)}</small></span>

@@ -22,7 +22,9 @@ export const fail = reason => ({ ok: false, reason });
 // 8차: 장착 칸 9개(무기 + 갑옷 + 7부위). 방어구 정의는 kind 'armor' + slot
 // 18차: 장신구 2칸(목걸이·반지)을 더해 11칸. v4~v11 기록은 V4_SLOTS(9칸)로 검사한다
 export const V4_SLOTS = ['weapon', 'armor', 'helm', 'shirt', 'cloak', 'gloves', 'belt', 'pants', 'boots'];
-export const ACC_SLOTS = ['neck', 'ring'];
+// 23차: 귀걸이·팔찌 2칸을 더해 13칸. v12~v15 기록은 V12_SLOTS(11칸)로 검사한다
+export const V12_SLOTS = [...V4_SLOTS, 'neck', 'ring'];
+export const ACC_SLOTS = ['neck', 'ring', 'ear', 'wrist'];
 export const EQUIP_SLOTS = [...V4_SLOTS, ...ACC_SLOTS];
 export const slotOf = def => def?.kind === 'weapon' ? 'weapon' : def?.kind === 'armor' ? (def.slot ?? 'armor') : null;
 export const isGearDef = def => def?.kind === 'weapon' || def?.kind === 'armor';

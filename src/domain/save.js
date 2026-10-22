@@ -1,5 +1,5 @@
 import defaultBalance from '../../data/balance.js';
-import { clone, finite, integer, isRecord, itemDef, EQUIP_SLOTS, V4_SLOTS, isGearDef, slotOf, enchantRule } from './common.js';
+import { clone, finite, integer, isRecord, itemDef, EQUIP_SLOTS, V4_SLOTS, V12_SLOTS, isGearDef, slotOf, enchantRule } from './common.js';
 import { needExp, playerStats, bonusPoints, validBonus } from './progression.js';
 import { defaultHotbar, validHotbar } from './hotbar.js';
 import { validBuffs } from './buffs.js';
@@ -27,7 +27,9 @@ import { elixirExtra, validElixir, validRecover, validDolls } from './growth.js'
 // 14 = 2026-10-20 20차: 장비 세트 save.loadouts(선택 필드, 3칸). 13 → 14는 v13 규칙(세트 없음)으로 검사 후 버전만
 // 15 = 2026-10-21 21차: 서리 봉우리(지도 frost)·보스 서리 용(bosses.drake)·최대 레벨 50·21차 아이템(p21).
 //      14 → 15는 v14 규칙(최대 40·서리 없음·p21 없음·보스 2)으로 검사한 뒤 bosses.drake = null만 더한다(경험치 공식 같음)
-export const SAVE_VERSION = 15;
+// 16 = 2026-10-22 23차: 장신구 2칸(equip.ear·wrist, 장비 세트도 13칸)·23차 아이템(p23: 귀걸이·팔찌·영웅/전설)·선물 save.gifts(선택 필드).
+//      15 → 16은 v15 규칙(11칸·p23 없음·선물 없음)으로 검사한 뒤 두 칸(null)만 더한다
+export const SAVE_VERSION = 16;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
@@ -43,7 +45,8 @@ export const V11_BACKUP_KEY = 'hwantasy.v11backup';
 export const V12_BACKUP_KEY = 'hwantasy.v12backup';
 export const V13_BACKUP_KEY = 'hwantasy.v13backup';
 export const V14_BACKUP_KEY = 'hwantasy.v14backup';
-const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY, 8: V8_BACKUP_KEY, 9: V9_BACKUP_KEY, 10: V10_BACKUP_KEY, 11: V11_BACKUP_KEY, 12: V12_BACKUP_KEY, 13: V13_BACKUP_KEY, 14: V14_BACKUP_KEY };
+export const V15_BACKUP_KEY = 'hwantasy.v15backup';
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY, 8: V8_BACKUP_KEY, 9: V9_BACKUP_KEY, 10: V10_BACKUP_KEY, 11: V11_BACKUP_KEY, 12: V12_BACKUP_KEY, 13: V13_BACKUP_KEY, 14: V14_BACKUP_KEY, 15: V15_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 export const V15_BOSSES = ['boss', 'lich', 'drake']; // 21차
@@ -141,7 +144,17 @@ export const no21 = b => {
 };
 // ⑤ #2: v13·v14는 '20차 밸런스'(= 지금 밸런스에서 21차를 뺀 것). SAVE_VERSION을 쓰지 않고 번호로 고정
 const balFor14 = (bal, version) => (version === 14 || version === 13 ? bal : no19(balFor12(bal, version)));
-export const balFor = (bal, version) => (version === SAVE_VERSION ? bal : no21(balFor14(bal, version)));
+// 23차: v15 이하 규칙 = 23차 아이템(p23)·그 아이템이 든 드랍 항목·선물 없음(no23은 여러 번 써도 같음)
+export const no23 = b => {
+  const items = list => list.filter(def => !def.p23);
+  const gone = new Set([...b.weapons, ...b.armors, ...b.consumables].filter(def => def.p23).map(def => def.id));
+  return {
+    ...b, weapons: items(b.weapons), armors: items(b.armors), consumables: items(b.consumables),
+    monsters: b.monsters.map(m => ({ ...m, drops: m.drops.filter(d => !(d.pool ?? [d.id]).some(id => gone.has(id))) })),
+    gifts: [],
+  };
+};
+export const balFor = (bal, version) => (version === 16 ? bal : version === 15 ? no23(bal) : no23(no21(balFor14(bal, version))));
 const balFor12 = (bal, version) => (version === 12 ? bal
   : version === 11 ? v11Bal(bal)
   : version === 10 ? v10Bal(bal)
@@ -173,6 +186,7 @@ export function newGame(bal) {
   save.buffs = {};
   save.morph = emptyMorph();
   Object.assign(save, newCollect(1, bal));
+  save.gifts = (bal.gifts ?? []).map(g => g.id); // 23차: 새 캐릭터는 지금 있는 선물을 받지 않는다
   save.player.hp = statsOf(save, bal).maxHp;
   return save;
 }
@@ -190,16 +204,21 @@ export function settleHp(save, bal) {
 }
 // 20차: 이름은 앞뒤 공백 없이 1~8글자(글자 = 코드 포인트), 한 세트 안 uid 중복 없음(⑤ #2·#3·#5)
 export const loadoutNameOk = name => typeof name === 'string' && name === name.trim() && [...name].length >= 1 && [...name].length <= 8;
-function validLoadouts(list) {
+// 23차: 칸 목록은 버전별(v14·v15 = 11칸, v16 = 13칸)
+function validLoadouts(list, slots = EQUIP_SLOTS) {
   if (!Array.isArray(list) || list.length !== 3) return false;
   return list.every(l => {
     if (l === null) return true;
-    if (!isRecord(l) || Object.keys(l).length !== 2 || !loadoutNameOk(l.name) || !isRecord(l.equip) || Object.keys(l.equip).length !== EQUIP_SLOTS.length) return false;
-    const uids = EQUIP_SLOTS.map(sl => l.equip[sl]);
-    if (!EQUIP_SLOTS.every(sl => Object.hasOwn(l.equip, sl)) || uids.some(u => u !== null && !integer(u, 1))) return false;
+    if (!isRecord(l) || Object.keys(l).length !== 2 || !loadoutNameOk(l.name) || !isRecord(l.equip) || Object.keys(l.equip).length !== slots.length) return false;
+    const uids = slots.map(sl => l.equip[sl]);
+    if (!slots.every(sl => Object.hasOwn(l.equip, sl)) || uids.some(u => u !== null && !integer(u, 1))) return false;
     const used = uids.filter(u => u !== null);
     return new Set(used).size === used.length;
   });
+}
+function validGifts(list, bal) {
+  const known = new Set((bal.gifts ?? []).map(g => g.id));
+  return Array.isArray(list) && list.every(id => typeof id === 'string' && known.has(id)) && new Set(list).size === list.length;
 }
 function validRestock(r, bal) {
   if (!isRecord(r) || Object.getPrototypeOf(r) !== Object.prototype) return false;
@@ -209,6 +228,7 @@ function validRestock(r, bal) {
 export function validate(save, bal, version = SAVE_VERSION) {
   // 21차 ⑤ #5: 옛 버전을 지금 밸런스로 넘겨도 21차 것(최대 50·서리·p21)은 받지 않게(no21은 여러 번 써도 같음)
   if (version < 15 && isRecord(bal?.progression) && Array.isArray(bal.monsters)) bal = no21(bal); // ⑦ #1: 최대 레벨과 상관없이 늘 적용
+  if (version < 16 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no23(bal); // 23차: 같은 방식
   const errors = [];
   const bad = message => errors.push(message);
   if (!isRecord(save)) return { ok: false, errors: ['저장은 객체여야 합니다'] };
@@ -250,6 +270,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
       if (def.p18 && version < 12) bad('옛 버전 기록에 장신구가 있습니다'); // 18차 ⑤ #1: 넘긴 밸런스와 상관없이 버전으로도 막음
       if (def.p19 && version < 13) bad('옛 버전 기록에 보스 코인이 있습니다'); // 19차
       if (def.p21 && version < 15) bad('옛 버전 기록에 21차 아이템이 있습니다'); // 21차 ⑤ #5
+      if (def.p23 && version < 16) bad('옛 버전 기록에 23차 아이템이 있습니다'); // 23차
       if (!integer(item.count, 1, gear ? 1 : bal.inventory.stackMax)) bad('아이템 수량이 올바르지 않습니다');
       if (gear ? !integer(item.enchant, 0, enchantRule(def, bal).max) : item.enchant !== undefined) bad('아이템 강화 단계가 올바르지 않습니다');
       // 13차: 잠금은 v9 장비에만, 값은 true만(없으면 안 잠김)
@@ -257,7 +278,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
     }
   }
   if (integer(save.nextUid, 1) && save.nextUid <= maxUid) bad('다음 uid는 기존 uid보다 커야 합니다');
-  const slots = version >= 12 ? EQUIP_SLOTS : version >= 4 ? V4_SLOTS : ['weapon', 'armor']; // 18차: v12부터 11칸
+  const slots = version >= 16 ? EQUIP_SLOTS : version >= 12 ? V12_SLOTS : version >= 4 ? V4_SLOTS : ['weapon', 'armor']; // 18차: v12부터 11칸, 23차: v16부터 13칸
   let equipOk = isRecord(save.equip);
   if (!equipOk) bad('장착 정보가 없습니다');
   else {
@@ -291,7 +312,9 @@ export function validate(save, bal, version = SAVE_VERSION) {
   // 14차 스킬 레벨(선택 필드): v10만, 배운 스킬의 2~5
   if ('skillLv' in save && (version < 10 || !levelOk || !validSkillLv(save.skillLv, p.level, bal))) bad('스킬 레벨이 올바르지 않습니다');
   // 20차 장비 세트(선택 필드, v14만): 길이 3, 칸마다 null 또는 {name, equip:{칸: uid|null}} — uid는 가방에 없어도 됨(바꿀 때 있는 것만)
-  if ('loadouts' in save && (version < 14 || !validLoadouts(save.loadouts))) bad('장비 세트 기록이 올바르지 않습니다');
+  if ('loadouts' in save && (version < 14 || !validLoadouts(save.loadouts, slots))) bad('장비 세트 기록이 올바르지 않습니다');
+  // 23차 선물(v16부터 꼭 있음 — ⑤ #1): 받은 선물 id 목록, 알려진 id만·중복 없음. 선물 id는 bal.gifts에서 지우지 않는다(⑤ #4)
+  if (version >= 16 ? !validGifts(save.gifts, bal) : 'gifts' in save) bad('선물 기록이 올바르지 않습니다');
   // 15차(선택 필드, v11만): 엘릭서·경험치 복구·마법인형
   if (isRecord(p) && 'elixir' in p && (version < 11 || !validElixir(p.elixir, bal))) bad('엘릭서 기록이 올바르지 않습니다');
   if ('recover' in save && (version < 11 || !validRecover(save.recover))) bad('경험치 복구 기록이 올바르지 않습니다');
@@ -438,6 +461,18 @@ function v8to9(save, bal) {
   next.version = 9;
   return next;
 }
+// 15→16(23차): v15 규칙(11칸·p23 없음)으로 검사한 뒤 귀걸이·팔찌 칸(null)을 장착·장비 세트에 더한다
+function v15to16(save, bal) {
+  const check = validate(save, balFor(bal, 15), 15);
+  if (!check.ok) throw new TypeError(`버전 15 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 16;
+  const widen = equip => Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, equip[slot] ?? null]));
+  next.equip = widen(save.equip);
+  next.gifts = []; // ⑤ #1: 넘어온 기록은 선물을 아직 안 받음(v16부터 gifts는 꼭 있음)
+  if (Array.isArray(next.loadouts)) next.loadouts = next.loadouts.map(l => (l === null ? null : { name: l.name, equip: widen(l.equip) }));
+  return next;
+}
 // 14→15(21차): v14 규칙(최대 40·서리 없음·보스 2)으로 검사한 뒤 서리 용 처치 기록(null)만 더한다
 function v14to15(save, bal) {
   const check = validate(save, balFor(bal, 14), 14);
@@ -469,7 +504,7 @@ function v11to12(save, bal) {
   if (!check.ok) throw new TypeError(`버전 11 저장 검사 실패: ${check.errors.join('; ')}`);
   const next = clone(save);
   next.version = 12;
-  next.equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, save.equip[slot] ?? null]));
+  next.equip = Object.fromEntries(V12_SLOTS.map(slot => [slot, save.equip[slot] ?? null])); // 23차: v12는 11칸(고정)
   return next;
 }
 // 10→11(15차): v10 규칙(엘릭서·인형 없음)으로 검사한 뒤 버전만
@@ -491,10 +526,11 @@ function v9to10(save, bal) {
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   if (save.version === SAVE_VERSION) return clone(save);
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
-  // 21차 ⑤ #3: 모든 경로가 마지막에 v14→15를 지난다
-  if (save.version === 14) return v14to15(save, bal);
-  const to14 = s => v14to15(v13to14(s, bal), bal);
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
+  // 21차 ⑤ #3: 모든 경로가 마지막에 v14→15를 지난다. 23차: 그 뒤 v15→16
+  if (save.version === 15) return v15to16(save, bal);
+  if (save.version === 14) return v15to16(v14to15(save, bal), bal);
+  const to14 = s => v15to16(v14to15(v13to14(s, bal), bal), bal);
   if (save.version === 13) return to14(save);
   if (save.version === 12) return to14(v12to13(save, bal));
   if (save.version === 11) return to14(v12to13(v11to12(save, bal), bal));
