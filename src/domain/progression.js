@@ -110,7 +110,8 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
   return {
     ...a, points: bonusPoints(level, bal),
     maxHp: Math.floor((hpBase * (100 + pm.hpPct + gearHpPct)) / 100),
-    dmgBonus: Math.max(Math.floor(level / k.atkDivisor), str) + gear.dmg + pmDmg,
+    // 26차: 활은 피해 보너스를 힘 대신 민첩으로(요정). 기사는 활을 낄 수 없어 값이 그대로
+    dmgBonus: Math.max(Math.floor(level / k.atkDivisor), wdef?.type === 'bow' ? dex : str) + gear.dmg + pmDmg,
     def: Math.floor(level / k.defDivisor) + Math.floor(con / st.conPerDef) + gear.def + pm.def + pmDef,
     hitBonus: Math.floor(dex / st.dexPerHit) + gear.hit + (wdef?.hit ?? 0) + pmHit,
     // 간격 = 민첩 → 패시브 → 무기 계열 순으로 곱하고 한 번 반올림(검은 speed 100이라 9차와 같은 값). 최소 간격도 무기 계열 비율

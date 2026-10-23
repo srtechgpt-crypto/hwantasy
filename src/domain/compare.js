@@ -9,6 +9,7 @@ import { applyBuffs } from './buffs.js';
 import { applyMorph, morphExtra } from './morph.js';
 import { baseDamage, finalDamage } from './combat.js';
 import { permOf } from './collect.js';
+import { balForSave, canWield, clsOf } from './classes.js';
 
 // 6차 점수(정의만으로, 레벨 무관) — 옛 시험·간단한 정렬용. 10차 무기 = (평균 + 강화 피해) × (100 + 피해%)/(100 + 간격%) × (1 + 치명%/200) + 명중%×0.3
 export function gearScore(id, enchant, bal) {
@@ -52,6 +53,7 @@ export const powerOf = (stats, level, bal) => dpsOf(stats, level, bal) + stats.d
 // 지금 장착 + (slot에 item을 바꿔 끼면)의 능력치. item = 가방 아이템 모양({id, enchant}) 또는 null
 // ⑦ #2: 켜진 버프(힘·날쌤·수호)도 실제 전투처럼 더한다(힘의 물약은 계열마다 상대 상승률이 달라 비교가 바뀔 수 있음)
 export function loadoutStats(save, bal, slot = null, item = undefined) {
+  bal = balForSave(bal, save); // 26차: 그 캐릭터 직업으로(⑤ #9)
   const equip = Object.fromEntries(EQUIP_SLOTS.map(s => [s, save.bag.find(i => i.uid === save.equip?.[s]) ?? null]));
   if (slot) equip[slot] = item ?? null;
   // 11차: 변신 무작위 힘·민첩은 원래 능력치에, 그다음 버프, 그다음 변신 효과(간격은 같은 atkMul에 곱함) — 게임 화면·비교·창이 모두 이 함수
@@ -63,6 +65,7 @@ export function equipScore(save, id, enchant, bal) {
   const def = itemDef(id, bal);
   if (!isGearDef(def)) return null;
   if (!integer(enchant)) throw new RangeError('강화 수치가 올바르지 않습니다');
+  if (!canWield(def, clsOf(save), bal)) return null; // 26차: 못 끼는 무기는 비교하지 않음
   const slot = slotOf(def), st = loadoutStats(save, bal, slot, { id, enchant, count: 1 });
   return def.kind === 'weapon' ? dpsOf(st, save.player.level, bal) : powerOf(st, save.player.level, bal);
 }

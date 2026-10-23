@@ -1,6 +1,9 @@
 // 창: 가방·상점(잡화상/대장장이)·창고·강화·순간이동. 열려 있으면 게임이 멈춘다(멈춤 사유 'window').
 // 모든 거래는 domain 함수로 새 save 후보를 만들고 G.commit으로 "저장에 성공했을 때만" 확정한다.
-import bal, { WEAPON_TYPES, ARMOR_LINES } from '../../data/balance.js';
+import { WEAPON_TYPES, ARMOR_LINES } from '../../data/balance.js';
+import { bal } from '../cbal.js'; // 26차: 지금 캐릭터 직업으로 본 밸런스(스킬 이름·숫자·카드 이름)
+import { canWield, clsOf, className } from '../domain/classes.js';
+import * as chars from '../domain/chars.js';
 import * as inv from '../domain/inventory.js';
 import { enchantInfo, tryEnchant, enchantPlan, enchantTo, blessedPlan, tryBlessed, lowerEnchant, blessedScrollOf, sameGearCandidates, enchantManyPlan, enchantMany } from '../domain/enchant.js';
 import { morphDef, unmorph, rollText } from '../domain/morph.js';
@@ -33,6 +36,8 @@ const DOLL = ['cloak', 'helm', 'gloves', 'weapon', 'armor', 'shirt', 'belt', 'pa
 // 빈 칸에 흐리게 보여 줄 그림
 const GHOST = { weapon: 'woodSword', armor: 'clothArmor', helm: 'helm1', shirt: 'shirt1', cloak: 'cloak1', gloves: 'gloves1', belt: 'belt1', pants: 'pants1', boots: 'boots1', neck: 'neck1', ring: 'ring1', ear: 'ear1', wrist: 'wrist1' };
 const icon = (id, cls = '') => `<img class="ic ${cls}" src="assets/icons/${id}.png" alt="">`;
+// 26차: 스킬 아이콘은 직업마다(요정 = sk_elf_<id>, 기사 = sk_<id>)
+const skIcon = (id) => bal.skills.find((k) => k.id === id)?.icon ?? `sk_${id}`;
 const itemName = (it) => `${it.enchant ? `+${it.enchant} ` : ''}${itemDef(it.id, bal)?.name ?? it.id}`;
 // 10차: 희귀 장비(금빛 테두리·이름), 무기 계열 이름
 const isRare = (id) => !!itemDef(id, bal)?.rare;
@@ -444,6 +449,8 @@ export function initWindows() {
       rows.push(['기간', '<b>끼고 있는 동안 계속</b>(영구) — 벗으면 효과가 빠집니다']);
       if (d.kind === 'weapon') {
         const t = TYPE_OF[d.type ?? 'sword'];
+        // 26차: 직업 제한(활 = 요정만, 대검·도끼 = 기사만)
+        if (!canWield(d, clsOf(s), bal)) rows.push(['직업', `<b class="bad-t">${inv.wieldReason(d, s, bal)}</b> — 창고에 맡겨 다른 캐릭터에게 줄 수 있습니다`]);
         rows.push(['종류', `${t?.noun ?? '검'} — ${t?.desc ?? ''}${d.rare ? ' · <b class="rare-t">희귀</b>(같은 등급보다 공격 ×1.25)' : ''}${d.rank ? ` · <b class="${d.rank}-t">${RANK_NAME[d.rank]}</b>(보스 전용, 공격 ×${d.rank === 'legend' ? 1.6 : 1.35})` : ''}${d.named ? ' · <b class="named-t">이름난</b>(같은 등급보다 공격 ×1.05)' : ''}`]);
       }
       if (lineOf(d)) rows.push(['계열', `<b>${lineOf(d).noun}</b> — ${lineOf(d).desc}`]);
@@ -855,6 +862,7 @@ export function initWindows() {
     ['con', '체력', '최대 체력·회복·방어가 올라 오래 버팁니다(사냥은 느려짐)'],
   ];
   function viewStats(s) {
+    const clsLine = `<p class="hint">${esc(s.hero?.name ?? '')} · <b>${className(clsOf(s), bal)}</b>${clsOf(s) === 'elf' ? ' — 활을 들면 피해 보너스가 힘 대신 <b>민첩</b>으로 오릅니다' : ''}</p>`;
     const draft = cur.draft ?? { str: 0, dex: 0, con: 0 };
     const used = draft.str + draft.dex + draft.con, left = inv.unspentPoints(s, bal) - used;
     const now = loadoutStats(s, bal);
@@ -869,7 +877,7 @@ export function initWindows() {
     const spent = s.player.bonus.str + s.player.bonus.dex + s.player.bonus.con;
     const cost = inv.resetCost(s, bal);
     const next = Math.ceil((s.player.level + 1) / bal.stats.pointEvery) * bal.stats.pointEvery;
-    return `<div class="statbox"><div>
+    return `<div class="statbox"><div>${clsLine}
         <p class="pts">남은 점수 <b class="${left > 0 ? 'gold-t' : ''}">${left}</b>${next <= bal.progression.maxLevel ? ` · 다음 점수 Lv ${next}` : ''}</p>
         ${used ? `<div class="btns"><button type="button" class="act primary" data-act="bonusok" ${cur.busy ? 'disabled' : ''}>확정</button><button type="button" class="act" data-act="bonusundo">되돌리기</button></div>
           <p class="hint">확정하면 바꿀 수 없습니다(마을에서 돈을 내고 다시 나눌 수 있음).</p>` : ''}
@@ -995,7 +1003,7 @@ export function initWindows() {
   const KIND_NAME = { attack: '공격', defense: '방어', ult: '필살기' };
   const ITEM_SHORT = { potion: '초급 물약', potionMid: '중급 물약', potionHigh: '고급 물약', returnScroll: '귀환 주문서',
     powerPotion: '힘의 물약', hastePotion: '날쌘 물약', guardPotion: '수호 물약', expScroll: '경험치 두루마리', huntScroll: '사냥터 이동', morphScroll: '변신 주문서' };
-  const slotIcon = (e) => (e.t === 'skill' ? `sk_${e.id}` : e.id);
+  const slotIcon = (e) => (e.t === 'skill' ? skIcon(e.id) : e.id);
   // 14차: 다음 레벨에서 바뀌는 값(지금 → 다음)
   function skillNextText(a, b) {
     const sec = (ms) => `${(ms / 1000).toFixed(1).replace(/\.0$/, '')}초`, parts = [];
@@ -1034,7 +1042,7 @@ export function initWindows() {
       const canUp = has && cost && haveC >= cost.cards && s.player.gold >= cost.gold && !cur.busy;
       const up = has ? (cost ? `<button type="button" class="act skup ${canUp ? 'primary' : ''}" data-act="skup" data-id="${k.id}" ${canUp ? '' : 'disabled'}>Lv ${slv + 1}로 · 카드 ${haveC}/${cost.cards} · ${won(cost.gold)}원</button>` : '<em class="ok-t">최고 레벨</em>') : '';
       return `<div class="skcard ${has ? '' : 'locked'} ${k.kind} g-${grade(k.id)} ${pickOn('skill', k.id) ? 'picked' : ''}">
-        <img class="ic" src="assets/icons/sk_${k.id}.png" alt="">
+        <img class="ic" src="assets/icons/${skIcon(k.id)}.png" alt="">
         <div class="sktext"><b>${esc(k.name)}</b> <span class="grade g-${grade(k.id)}">${bal.gradeNames[grade(k.id)]}</span> ${stars} <em>${KIND_NAME[k.kind]} · Lv ${k.level} · ${(now.cooldownMs / 1000).toFixed(1).replace(/\.0$/, '')}초</em><p>${esc(k.desc)}</p>
           <p class="sknext">${has ? fx : ''}</p></div>
         ${has ? `<div class="skbtns"><button type="button" class="act primary" data-act="hbpick" data-t="skill" data-id="${k.id}">칸에 넣기</button>
@@ -1182,7 +1190,13 @@ export function initWindows() {
   // 창고
   function viewBank(s) {
     const it = selected(s);
-    let ctl = '<p class="hint">맡길 물건은 왼쪽(가방), 찾을 물건은 오른쪽(창고)에서 고르세요.</p>';
+    let ctl = '<p class="hint">맡길 물건은 왼쪽(가방), 찾을 물건은 오른쪽(창고)에서 고르세요. 창고는 모든 캐릭터가 함께 씁니다.</p>';
+    // 26차 창고 돈: 모든 캐릭터가 함께 쓰는 돈(캐릭터끼리 돈을 옮기는 길)
+    const wg = `<div class="wgold"><span>창고 돈 <b class="gold-t">${won(s.wgold ?? 0)}원</b></span>
+      <input id="wgAmt" data-keep inputmode="numeric" placeholder="금액" value="${cur.wgAmt ?? ''}">
+      <button type="button" class="act" data-act="wgAll" ${cur.busy ? 'disabled' : ''}>내 돈 전부</button>
+      <button type="button" class="act primary" data-act="wgIn" ${cur.busy ? 'disabled' : ''}>맡기기 →</button>
+      <button type="button" class="act" data-act="wgOut" ${cur.busy ? 'disabled' : ''}>← 찾기</button></div>`;
     if (it) {
       const fromBag = cur.sel.where === 'bag', eq = fromBag && equipped(s, it.uid);
       ctl = `<div class="bankctl">${icon(it.id)}<b>${esc(itemName(it))}</b>${it.count > 1 ? qtyBox(it.count) : ''}
@@ -1190,7 +1204,7 @@ export function initWindows() {
         ${eq ? '<span class="hint">장착 중인 장비는 먼저 벗어 주세요</span>' : ''}</div>`;
     }
     const sortBtn = (w) => `<button type="button" class="chip sortbtn" data-act="sortbag" data-where="${w}" ${cur.busy ? 'disabled' : ''}>정리</button>`;
-    return `<div class="bank"><div><h4>가방 ${s.bag.length}/${bal.inventory.bagSlots} ${sortBtn('bag')}</h4>${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}</div>
+    return `${wg}<div class="bank"><div><h4>가방 ${s.bag.length}/${bal.inventory.bagSlots} ${sortBtn('bag')}</h4>${grid(s.bag, 'bag', bal.inventory.bagSlots, s, { dimEquipped: true })}</div>
       <div><h4>창고 ${s.warehouse.length}/${bal.inventory.warehouseSlots} ${sortBtn('warehouse')}</h4>${grid(s.warehouse, 'warehouse', bal.inventory.warehouseSlots, s)}</div></div>${ctl}`;
   }
 
@@ -1543,6 +1557,15 @@ export function initWindows() {
         const it = selected(s); if (!it) return;
         const n = Math.min(cur.qty, it.count), gold = inv.sellPrice(it.id, bal) * n, name = itemName(it);
         deal(inv.sell(s, it.uid, n, bal), 'sell', { okText: `${name} ${won(n)}개를 팔았습니다 (+${won(gold)}원)`, after: () => { if (cur) { cur.sel = null; cur.qty = 1; cur.qtyFresh = true; } } });
+        return;
+      }
+      case 'wgAll': cur.wgAmt = String(s.player.gold); break;
+      case 'wgIn': case 'wgOut': {
+        const raw = (document.getElementById('wgAmt')?.value ?? '').replace(/[,\s원]/g, '');
+        const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+        cur.wgAmt = raw;
+        const res = a === 'wgIn' ? chars.depositGold(s, n, bal) : chars.withdrawGold(s, n, bal);
+        deal(res, a, { okText: `${won(n)}원을 ${a === 'wgIn' ? '창고에 맡겼습니다' : '창고에서 찾았습니다'}`, after: () => { if (cur) cur.wgAmt = ''; } });
         return;
       }
       case 'deposit': case 'withdraw': {

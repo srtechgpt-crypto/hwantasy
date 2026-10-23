@@ -1,6 +1,8 @@
 // 게임 화면: 지도, 기사, 몬스터·보스, NPC, 전투, 자동 사냥. 숫자 계산은 모두 domain 모듈에 맡긴다.
 // 시간: 전투·무적·재생성·땅 아이템·보스 방 초기화는 게임 시계(this.gt, 멈추면 안 흐름), 보스 재등장만 실제 시각(Date.now).
-import bal from '../../data/balance.js';
+import { BOW } from '../../data/balance.js';
+import { bal } from '../cbal.js'; // 26차: 지금 캐릭터 직업으로 본 밸런스(게임 시작 때 정함)
+import { clsOf, className } from '../domain/classes.js';
 import { buildWorld, TILE, W, H, mapIdAt, regionName, inBossRoom, BOSS_ROOMS, bossRoomOf, NPCS, TINTS, REGIONS } from '../../data/maps.js';
 import { makeRng } from '../domain/rng.js';
 import * as prog from '../domain/progression.js';
@@ -84,6 +86,8 @@ const HERO_IDLE = [0];
 const HERO_WALK = [1, 2, 3, 4, 5, 6];
 const HERO_ATK = [7, 8, 9, 10, 11, 12];
 const HERO_ROW = { down: 0, downRight: 1, right: 2, upRight: 3, up: 4, upLeft: 5, left: 6, downLeft: 7 };
+// 26차: 직업마다 그림(같은 칸 배치: 0 서기·1~6 걷기·7~12 공격, 8방향 줄). 요정 = PixelLab 요정 궁수(그림원본/pixellab_요정궁수/build.py)
+const LOOKS = { knight: { key: 'hero', anim: 'hero', frame: HERO_FRAME, feet: HERO_FEET }, elf: { key: 'hero_elf', anim: 'elf', frame: 56, feet: 47 } };
 const DIR8 = ['right', 'downRight', 'down', 'downLeft', 'left', 'upLeft', 'up', 'upRight'];
 const dir8Of = (dx, dy) => DIR8[((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8];
 const dirOf = (dx, dy) => (Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down');
@@ -95,6 +99,7 @@ export class WorldScene extends Phaser.Scene {
   preload() {
     this.load.image('tiles', 'assets/tiles_ex.png'); // 5차: 둘레 1px 늘린 그림(타일 틈 줄 방지, 도구/타일늘리기.py)
     this.load.spritesheet('hero', 'assets/hero.png', { frameWidth: HERO_FRAME, frameHeight: HERO_FRAME });
+    this.load.spritesheet('hero_elf', 'assets/hero_elf.png', { frameWidth: LOOKS.elf.frame, frameHeight: LOOKS.elf.frame });
     this.load.image('sword', 'assets/sword.png');
     this.load.image('coin', 'assets/coin.png');
     this.load.image('ult_sword', 'assets/ult_sword.png'); // 9차 성검 강림(PixelLab)
@@ -120,7 +125,12 @@ export class WorldScene extends Phaser.Scene {
     // 발끝이 그림 칸의 HERO_FEET 줄에 있다
     this.hero = this.add.sprite(this.knight.x, this.knight.y, 'hero', 0).setOrigin(0.5, HERO_FEET / HERO_FRAME).setDepth(10);
     this.dir8 = 'down';
+    this.hk = 'hero'; // 26차: 지금 직업 그림의 동작 이름 앞부분(enterGame에서 직업으로 바꿈)
     this.hero.play('hero_idle_down');
+    // 26차 화살(요정 활): 작은 그림을 한 번 만들어 둔다
+    const ag = this.add.graphics();
+    ag.fillStyle(0x6b4a2a).fillRect(0, 1, 9, 1); ag.fillStyle(0xe8e8f0).fillRect(9, 0, 2, 3); ag.fillStyle(0xffffff).fillRect(0, 0, 2, 1).fillRect(0, 2, 2, 1);
+    ag.generateTexture('arrow', 11, 3); ag.destroy();
     // 칼은 기사 그림에 들어 있어 따로 그리지 않는다(예전 칼 그림은 숨김)
     this.sword = this.add.image(0, 0, 'sword').setVisible(false);
     this.swinging = false;
@@ -341,11 +351,11 @@ export class WorldScene extends Phaser.Scene {
     const mk = (key, prefix) => DIRS.forEach((d, c) => {
       this.anims.create({ key: `${prefix}_walk_${d}`, frames: [0, 4, 8, 12].map((f) => ({ key, frame: f + c })), frameRate: 8, repeat: -1 });
     });
-    for (const [d, row] of Object.entries(HERO_ROW)) {
-      const fr = (cols) => cols.map((c) => ({ key: 'hero', frame: row * HERO_COLS + c }));
-      this.anims.create({ key: `hero_idle_${d}`, frames: fr(HERO_IDLE), frameRate: 3, repeat: -1 });
-      this.anims.create({ key: `hero_run_${d}`, frames: fr(HERO_WALK), frameRate: 10, repeat: -1 });
-      this.anims.create({ key: `hero_atk_${d}`, frames: fr(HERO_ATK), frameRate: 22, repeat: 0 });
+    for (const look of Object.values(LOOKS)) for (const [d, row] of Object.entries(HERO_ROW)) {
+      const fr = (cols) => cols.map((c) => ({ key: look.key, frame: row * HERO_COLS + c }));
+      this.anims.create({ key: `${look.anim}_idle_${d}`, frames: fr(HERO_IDLE), frameRate: 3, repeat: -1 });
+      this.anims.create({ key: `${look.anim}_run_${d}`, frames: fr(HERO_WALK), frameRate: 10, repeat: -1 });
+      this.anims.create({ key: `${look.anim}_atk_${d}`, frames: fr(HERO_ATK), frameRate: look === LOOKS.elf ? 18 : 22, repeat: 0 });
     }
     this.anims.create({ key: 'fx_return', frames: this.anims.generateFrameNumbers('fx_return'), frameRate: 14 });
     for (const [id, key] of Object.entries(MON_KEYS)) mk(key, id);
@@ -364,6 +374,7 @@ export class WorldScene extends Phaser.Scene {
       p.x < W * TILE && p.y < H * TILE && mapIdAt(p.x) === p.map && !this.blocked(p.x, p.y);
     this.knight.x = valid ? p.x : this.wmap.spawn.x; this.knight.y = valid ? p.y : this.wmap.spawn.y;
     if (!valid) Object.assign(p, { map: 'town', x: this.knight.x, y: this.knight.y });
+    this.applyLook();
     this.drawHero();
     this.releaseInput();
     this.setAuto(false);
@@ -384,9 +395,19 @@ export class WorldScene extends Phaser.Scene {
     this.restockDue = this.region === 'town'; // 13차: 마을에서 이어하면 한 번
     this.giftDue = true; // 23차: 들어올 때마다 안 받은 선물을 한 번 확인
     this.playing = true;
-    hud.log(isNew ? '바람 마을에 도착했습니다. 마을 사람들에게 다가가 [대화]를 눌러 보세요.' : `다시 오셨습니다. Lv ${p.level} 기사`);
+    hud.log(isNew ? '바람 마을에 도착했습니다. 마을 사람들에게 다가가 [대화]를 눌러 보세요.' : `다시 오셨습니다. Lv ${p.level} ${className(clsOf(G.save), bal)} ${G.save.hero?.name ?? ''}`);
     this.refreshHud(true);
     this.refreshSkills(true);
+  }
+
+  // 26차: 지금 캐릭터 직업 그림으로(그림·발끝·동작 이름)
+  applyLook() {
+    const look = LOOKS[clsOf(G.save)] ?? LOOKS.knight;
+    this.hk = look.anim;
+    this.swinging = false;
+    this.hero.off('animationcomplete', this.onSwingDone, this);
+    this.hero.setTexture(look.key, 0).setOrigin(0.5, look.feet / look.frame);
+    this.hero.play(`${this.hk}_idle_${this.dir8}`, true);
   }
 
   leaveGame() { this.playing = false; this.setAuto(false); this.releaseInput(); this.cancelCasting(this.casting, false); this.castGen++; }
@@ -592,7 +613,7 @@ export class WorldScene extends Phaser.Scene {
     if (G.pending) return; // 보스 저장 실패 등: 같은 프레임에 다른 상태를 바꾸지 않는다
 
     if (this.swinging && this.gt >= this.swingEnd) this.swinging = false;
-    if (!this.swinging) this.hero.play(`${walking ? 'hero_run' : 'hero_idle'}_${this.dir8}`, true);
+    if (!this.swinging) this.hero.play(`${this.hk}_${walking ? 'run' : 'idle'}_${this.dir8}`, true);
     this.drawHero();
 
     this.updateMonsters(dt, now);
@@ -971,6 +992,33 @@ export class WorldScene extends Phaser.Scene {
 
   dist(m) { return Math.hypot(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y) - (m.reach || 0); }
 
+  // 26차 활(⑤ #13·#14): 사거리 = 기사와 같은 '중심 거리 − 몸 크기'로 BOW.rangeTiles칸. 쏘는 줄(발 → 몬스터 발)이 막힌 칸을 지나면 못 쏨
+  bowOn() {
+    const s = G.save, it = s?.bag.find((i) => i.uid === s.equip.weapon);
+    return !!it && itemDef(it.id, bal)?.type === 'bow';
+  }
+  reach() { return this.bowOn() ? BOW.rangeTiles * TILE : ATTACK_RANGE; }
+  clearLine(m) { return this.shotClear(this.knight.x, this.knight.y, m.sprite.x, m.sprite.y); }
+  // ⑦ #5: 선분이 지나는 칸을 차례로(Amanatides–Woo). 모서리를 정확히 지나면 맞닿은 두 칸도 본다. 시작·끝 칸은 빼고 본다(서 있는 칸)
+  shotClear(x0, y0, x1, y1) { // (길찾기의 lineClear와 다른 함수 — 이름 겹치지 않게)
+    let tx = Math.floor(x0 / TILE), ty = Math.floor(y0 / TILE);
+    const ex = Math.floor(x1 / TILE), ey = Math.floor(y1 / TILE), dx = x1 - x0, dy = y1 - y0;
+    const sx = Math.sign(dx), sy = Math.sign(dy);
+    const solid = (cx, cy) => (cx !== Math.floor(x0 / TILE) || cy !== Math.floor(y0 / TILE)) && (cx !== ex || cy !== ey) && this.solidAt(cx * TILE + TILE / 2, cy * TILE + TILE / 2);
+    const stepX = sx ? Math.abs(TILE / dx) : Infinity, stepY = sy ? Math.abs(TILE / dy) : Infinity;
+    let mx = sx ? ((sx > 0 ? (tx + 1) * TILE - x0 : x0 - tx * TILE) / Math.abs(dx)) : Infinity;
+    let my = sy ? ((sy > 0 ? (ty + 1) * TILE - y0 : y0 - ty * TILE) / Math.abs(dy)) : Infinity;
+    for (let guard = 0; guard < 200 && (tx !== ex || ty !== ey); guard++) {
+      if (Math.abs(mx - my) < 1e-9) { if (solid(tx + sx, ty) || solid(tx, ty + sy)) return false; tx += sx; ty += sy; mx += stepX; my += stepY; }
+      else if (mx < my) { tx += sx; mx += stepX; }
+      else { ty += sy; my += stepY; }
+      if (solid(tx, ty)) return false;
+    }
+    return true;
+  }
+  // 이 거리 안에서 칠 수 있나(근접 거리면 줄 검사 없음 — 기사와 같은 판정)
+  inShot(m, range) { const d = this.dist(m); return d <= range && (d <= ATTACK_RANGE || this.clearLine(m)); }
+
   // 보스는 기사도 방 안에 있을 때만 때릴 수 있다(방 밖에서 일방적으로 치기 방지)
   canHit(m) { return m.alive && (!m.def.isBoss || inBossRoom(this.knight.x, this.knight.y)?.id === m.id); }
 
@@ -979,14 +1027,15 @@ export class WorldScene extends Phaser.Scene {
     for (const m of this.monsters) {
       if (!this.canHit(m)) continue;
       const d = this.dist(m);
-      if (d <= bd) { bd = d; best = m; }
+      if (d <= bd && (d <= ATTACK_RANGE || this.clearLine(m))) { bd = d; best = m; } // 26차: 벽 뒤는 건너뛰고 쏠 수 있는 것 중 가장 가까운 것
     }
     return best;
   }
 
   tryAttack(target) {
     if (this.attackCd > 0 || this.casting) return false;
-    const m = target && this.canHit(target) && this.dist(target) <= ATTACK_RANGE ? target : this.nearestMonster(ATTACK_RANGE);
+    const r = this.reach();
+    const m = target && this.canHit(target) && this.inShot(target, r) ? target : this.nearestMonster(r);
     if (!m) return false;
     this.attackCd = this.stats().attackMs / 1000;
     this.swingAt(m);
@@ -1053,7 +1102,7 @@ export class WorldScene extends Phaser.Scene {
     this.attackCd = this.stats().attackMs / 1000;
     this.refreshSkills(true);
   }
-  pickTarget(target, range) { return target && this.canHit(target) && this.dist(target) <= range ? target : this.nearestMonster(range); }
+  pickTarget(target, range) { return target && this.canHit(target) && this.inShot(target, range) ? target : this.nearestMonster(range); }
   stunMon(m, ms) { m.stunUntil = Math.max(m.stunUntil ?? 0, this.gt + ms); this.stunFx(m); }
 
   // 방어 스킬: 막기·회복·아머·반격(대상 필요 없음)
@@ -1079,7 +1128,7 @@ export class WorldScene extends Phaser.Scene {
 
   // 강타·쇼크 스턴: 한 마리
   skillSingle(def, target, manual) {
-    const m = this.pickTarget(target, ATTACK_RANGE);
+    const m = this.pickTarget(target, this.reach());
     if (!m) { if (manual) hud.toast('가까운 몬스터가 없습니다'); return false; }
     this.spendAttack(def);
     const bash = def.id === 'bash', color = bash ? '#ffb070' : '#ffe680';
@@ -1151,7 +1200,15 @@ export class WorldScene extends Phaser.Scene {
   skillDash(def, target, manual) {
     const range = def.rangeTiles * TILE;
     const m = this.pickTarget(target, range);
-    if (!m) { if (manual) hud.toast('돌진할 몬스터가 없습니다'); return false; }
+    if (!m) { if (manual) hud.toast(def.shot ? '쏠 수 있는 몬스터가 없습니다' : '돌진할 몬스터가 없습니다'); return false; }
+    // 26차 요정 윈드 샷(shot): 움직이지 않고 그 자리에서 멀리 쏜다(⑤ #11)
+    if (def.shot) {
+      this.spendAttack(def);
+      this.swingAt(m, 0x9fffe0);
+      this.fx.title(this.knight.x, this.knight.y - 28, def.name, '#9fffe0');
+      this.strike(m, def.mult, '#9fffe0');
+      return true;
+    }
     const land = this.dashLanding(m);
     if (!land) { if (manual) hud.toast('돌진할 길이 막혀 있습니다'); return false; }
     this.spendAttack(def);
@@ -1249,7 +1306,7 @@ export class WorldScene extends Phaser.Scene {
       if (!e) { list.push({ i, empty: true }); continue; }
       if (e.t === 'skill') {
         const d = this.sk(e.id);
-        list.push({ i, kind: 'skill', id: e.id, name: d.name, icon: `sk_${e.id}`, label: d.short, left: this.skillLeft(e.id), total: d.cooldownMs, active: this.buffOn(e.id), casting: this.casting?.id === e.id });
+        list.push({ i, kind: 'skill', id: e.id, name: d.name, icon: d.icon ?? `sk_${e.id}`, label: d.short, left: this.skillLeft(e.id), total: d.cooldownMs, active: this.buffOn(e.id), casting: this.casting?.id === e.id });
       } else {
         const pd = bal.consumables.find((c) => c.id === e.id);
         const potion = pd?.heal > 0;
@@ -1654,7 +1711,7 @@ export class WorldScene extends Phaser.Scene {
       bagFull,
       potionReady: this.potionCd <= 0,
       attackReady: this.attackCd <= 0,
-      attackRange: ATTACK_RANGE,
+      attackRange: this.reach(), // 26차: 활이면 멀리서 '공격'으로 판단(벽 뒤면 tryAttack이 실패해 쫓아감)
       monsters: this.monsters.map((m) => ({ id: m.uid, x: m.sprite.x, y: m.sprite.y, alive: m.alive, isBoss: !!m.def.isBoss, area: mapIdAt(m.sprite.x), hpRatio: Math.max(0, m.hp / m.def.hp) })),
       targetId: this.autoTarget,
       // 5차: 같은 지역에서 찾아가기·스킬
@@ -2014,11 +2071,13 @@ export class WorldScene extends Phaser.Scene {
     this.dir8 = dir8Of(dx, dy);
     // 끝나는 시각은 게임 시계로 판단(다른 동작이 끼어들어도 굳지 않게)
     this.swinging = true;
-    const key = `hero_atk_${this.dir8}`;
+    const key = `${this.hk}_atk_${this.dir8}`;
     this.swingEnd = this.gt + 600; // 보조 장치: 끝 알림을 못 받아도 굳지 않게
     this.hero.off('animationcomplete', this.onSwingDone, this);
     this.hero.play(key);
     this.hero.once('animationcomplete', this.onSwingDone, this);
+    // 26차: 활이면 화살이 대상까지 날아간다(보기만 — 피해는 쏘는 순간 strike가 정함)
+    if (this.bowOn()) { this.shootArrow(m, fxTint); return; }
     // 몸: 대상 쪽으로 반 발짝 내딛었다 돌아옴
     this.tweens.killTweensOf(this.lunge);
     this.lunge.x = 0; this.lunge.y = 0;
@@ -2029,7 +2088,15 @@ export class WorldScene extends Phaser.Scene {
     fx.play('fx_slash'); fx.once('animationcomplete', () => fx.destroy());
   }
 
-  onSwingDone(anim) { if (anim?.key?.startsWith('hero_atk_')) this.swinging = false; }
+  shootArrow(m, tint) {
+    const x0 = this.knight.x, y0 = this.knight.y - 14, x1 = m.sprite.x, y1 = m.sprite.y - (m.def.isBoss ? 14 : 6);
+    const ang = Math.atan2(y1 - y0, x1 - x0), d = Math.hypot(x1 - x0, y1 - y0);
+    const a = this.add.image(x0, y0, 'arrow').setDepth(950).setRotation(ang);
+    if (tint) a.setTint(tint);
+    this.tweens.add({ targets: a, x: x1, y: y1, duration: Math.max(60, d * 2.2), onComplete: () => a.destroy() });
+  }
+
+  onSwingDone(anim) { if (anim?.key?.startsWith(`${this.hk}_atk_`)) this.swinging = false; }
 
   // 귀환·죽음·순간이동 때 칼질 중이던 동작을 정리한다
   cancelSwing() {
@@ -2037,7 +2104,7 @@ export class WorldScene extends Phaser.Scene {
     this.hero.off('animationcomplete', this.onSwingDone, this);
     this.tweens.killTweensOf(this.lunge);
     this.lunge.x = 0; this.lunge.y = 0;
-    this.hero.play(`hero_idle_${this.dir8}`, true);
+    this.hero.play(`${this.hk}_idle_${this.dir8}`, true);
   }
 
   knockback(m) {

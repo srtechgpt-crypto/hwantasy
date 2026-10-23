@@ -120,6 +120,27 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .wide.ghost { background: transparent; border-color: var(--line); }
 .wide.danger { background: rgba(181, 55, 47, .35); border-color: var(--danger); }
 .confirm { display: grid; gap: 8px; }
+/* 26차 시작 화면 캐릭터 카드·새 캐릭터 */
+.wgold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 13px; }
+.wgold input { width: 110px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,.45); color: var(--parch); font: inherit; user-select: text; -webkit-user-select: text; }
+.charlist { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; max-width: 92vw; }
+.charcard { display: grid; grid-template-columns: 40px auto; align-items: center; gap: 2px 8px; min-width: 132px; padding: 6px 12px 6px 6px; border-radius: 8px; background: rgba(0,0,0,.35); border: 1px solid var(--line); text-align: left; }
+.charcard img { grid-row: span 2; width: 40px; height: 40px; image-rendering: pixelated; }
+.charcard b { font-size: 14px; color: var(--parch); }
+.charcard small { font-size: 11px; color: var(--muted); }
+.charcard.cur { border-color: var(--gold); box-shadow: 0 0 12px rgba(224,166,62,.35); }
+.charcard.cur small::after { content: ' · 지금'; color: var(--gold); }
+.charcard:active { transform: scale(.97); }
+.newchar { display: grid; gap: 8px; justify-items: center; }
+.nc-h { margin: 0; color: var(--gold); font-family: var(--font-display); }
+.classpick { display: flex; gap: 10px; }
+.classcard { display: grid; justify-items: center; gap: 2px; width: 150px; padding: 8px; border-radius: 8px; background: rgba(0,0,0,.35); border: 1px solid var(--line); }
+.classcard img { width: 48px; height: 48px; image-rendering: pixelated; }
+.classcard b { font-size: 15px; }
+.classcard small { font-size: 11px; color: var(--muted); line-height: 1.4; }
+.classcard.on { border-color: var(--gold); background: rgba(224,166,62,.18); box-shadow: 0 0 12px rgba(224,166,62,.35); }
+.namein { width: 240px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,.45); color: var(--parch); font: inherit; text-align: center; user-select: text; -webkit-user-select: text; }
+@media (max-height: 430px) { .title-box h1 { font-size: 34px; } .title-box { gap: 8px; } .classcard img { width: 36px; height: 36px; } }
 .confirm p { margin: 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; width: min(460px, 92vw); max-height: 92vh; overflow: auto; display: grid; gap: 10px; text-align: center; }
 .panel h2 { font-family: var(--font-display); margin: 0; font-size: 20px; color: var(--gold); }

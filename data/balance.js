@@ -359,6 +359,57 @@ const TITLES = [
 // 시뮬레이터(예상 시간 표)는 도감·칭호·목표판을 쓰지 않는다(정비 때 ▲ 아닌 장비는 따로 팔아 도감 보호와 무관) → 실제 게임이 조금 빠름
 const QUEST = { count: { field: 30, forest: 40, mine: 50, ruin: 60, frost: 70 }, firstRate: 0.5, repeatExp: 0.1, repeatGold: 0.2, aheadLevels: 3, killsMax: 1e12 };
 
+// 26차 요정: 활(type 'bow', 원거리). 같은 등급 검의 주사위·값을 바탕으로 최종 피해 % 를 낮춘다(사거리 값 — 시뮬레이터로 맞춤).
+// 모든 활 = p26(v17 이하 기록에는 없음). 희귀·도감·이름난 목록을 다 만든 뒤에 넣어 RARE/HERO/LEGEND_POOLS·드랍 표 내용이 그대로 [가정]
+export const BOW = { type: 'bow', key: 'Bow', noun: '활', dmgPct: -15, rangeTiles: 4.5, desc: '멀리서 쏨 · 요정만' };
+WEAPON_TYPES.push(BOW);
+const BOW_ROWS = [['woodSword', 'woodBow', '나무 활'], ['ironSword', 'ironBow', '철 활'], ['steelSword', 'steelBow', '강철 활'], ['deepSword', 'deepBow', '깊은돌 활'],
+  ['mithrilSword', 'mithrilBow', '미스릴 활'], ['wraithSword', 'wraithBow', '망령 활'], ['frostSword', 'frostBow', '서리강 활'], ['drakeSword', 'drakeBow', '용비늘 활']];
+const bowOf = (b, id, name) => {
+  const { p21: _p21, type: _type, ...rest } = b;
+  return { ...rest, id, name, type: 'bow', dmgPct: BOW.dmgPct, p26: true };
+};
+const bows = BOW_ROWS.map(([sid, id, name]) => bowOf(weapons.find(w => w.id === sid), id, name));
+const rareBows = bows.filter(d => d.tier).map(d => ({ ...rareOf(d), p26: true }));
+const rankBows = bows.filter(d => d.tier >= 4).flatMap(d => ['hero', 'legend'].map(r => ({ ...rankOf({ ...d, type: 'sword' }, r), type: 'bow', dmgPct: BOW.dmgPct, p26: true })).map(({ p23: _p23, ...d2 }) => d2));
+weapons.push(...bows, ...rareBows, ...rankBows);
+// 요정 보기에서 검 드랍을 같은 등급 활로 바꾸는 표(난수 쓰는 횟수는 그대로 — 나오는 물건 id만 바뀜)
+export const SWORD_TO_BOW = Object.fromEntries([
+  ...BOW_ROWS.map(([sid, id]) => [sid, id]),
+  ...BOW_ROWS.filter(([sid]) => weapons.find(w => w.id === sid).tier).map(([sid, id]) => [`${sid}_r`, `${id}_r`]),
+  ...BOW_ROWS.filter(([sid]) => (weapons.find(w => w.id === sid).tier ?? 0) >= 4).flatMap(([sid, id]) => [[`${sid}_h`, `${id}_h`], [`${sid}_l`, `${id}_l`]]),
+]);
+// 26차 직업. 기사 = 지금 밸런스 그대로(skills·passives·knight·stats·start). 요정은 classBal(src/domain/classes.js)이 이 값으로 바꿔 끼운다.
+// 스킬 id는 기사와 같다(단축 칸·스킬 레벨·카드·자동 사냥이 그대로) — 이름·숫자·설명·아이콘만 요정 것 [가정]
+const ELF_SKILLS = {
+  bash: { name: '트리플 애로우', short: '트리플', mult: 2, desc: '화살 세 발 — 두 배 피해' },
+  block: { name: '윈드 실드', short: '실드', desc: '8초 동안 공격을 40% 확률로 바람이 막음' },
+  dash: { name: '윈드 샷', short: '윈드', mult: 1.6, rangeTiles: 6, shot: true, desc: '6칸 안 적에게 바람 화살 1.6배 피해' },
+  stun: { name: '엔탱글', short: '묶기', desc: '1.2배 피해 + 2초 묶기(보스 제외)' },
+  quake: { name: '스톰 샷', short: '스톰', radiusTiles: 4.5, arcDeg: 60, desc: '앞쪽 4.5칸 부채꼴 1.5배 피해 + 1.5초 느려짐' },
+  heal: { name: '네이처스 터치', short: '치유', healPct: 30, desc: '최대 체력의 30% 즉시 회복' },
+  whirl: { name: '윈드 버스트', short: '버스트', desc: '둘레 2.5칸 모든 적에게 바람 칼날' },
+  ult: { name: '엘리멘탈 폴 다운', short: '정령', desc: '필살기: 둘레 3.5칸 4배 피해 + 1초 기절' },
+  guard: { name: '어스 스킨', short: '스킨', reduce: 0.25, desc: '20초 동안 받는 피해 25% 감소' },
+  counter: { name: '카운터 미러', short: '미러', desc: '10초 동안 받은 피해의 절반을 되돌려줌' },
+};
+const ELF_PASSIVES = [
+  { id: 'p_e1', name: '정령의 눈', level: 3, critPct: 5, desc: '치명타 5% (피해 1.5배)' },
+  { id: 'p_e2', name: '숲의 숨결', level: 12, hpPct: 6, desc: '최대 체력 +6%' },
+  { id: 'p_e3', name: '나무 껍질', level: 18, def: 1, desc: '방어 +1' },
+  { id: 'p_e4', name: '바람의 손', level: 27, atkPct: 5, desc: '공격 간격 -5%' },
+  { id: 'p_e5', name: '자연의 가호', level: 38, lowHpReduce: 0.2, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -20%' },
+];
+const CLASSES = {
+  knight: { name: '기사', desc: '튼튼한 근접 전사 · 검·대검·도끼·창·단검', noWeapon: ['bow'] },
+  elf: {
+    name: '요정', desc: '멀리서 활을 쏘는 궁수 · 민첩이 높음', noWeapon: ['twohand', 'axe'],
+    skills: ELF_SKILLS, passives: ELF_PASSIVES,
+    base: { baseHp: 70, hpPerLevel: 13 },
+    stats: { str: [1, 3], dex: [1, 1], con: [1, 3] }, // 시뮬레이터 2회: 활 −15%·민첩 1/레벨 → 레벨 50까지 30.1h(기사 힘 28.6h) [가정]
+    start: { weapon: 'woodBow' },
+  },
+};
 export default {
   version: 1,
   // 5차(스킬·돈 ×2.5): a=155, 성터 경험치 ×1.08 → 시뮬레이터 3회 1→30 10.12h, 30→40 9.85h, 합 19.97h(게임 시계).
@@ -503,6 +554,8 @@ export default {
   quest: QUEST,
   // 23차 선물: 게임에 들어가면 안 받은 선물을 한 번 받는다(save.gifts에 받은 id). id는 지우거나 바꾸지 않는다. 새 게임은 모두 받은 것으로 시작
   gifts: [{ id: 'gift23', gold: 10000000, text: '23차 기념 선물' }],
+  // 26차 직업(classes)·캐릭터 최대 수·창고 돈 상한
+  classes: CLASSES, maxChars: 6, wgoldMax: 1e15,
   // walkSpeed: 기사 걸음(px/초, World SPEED) — 시뮬레이터 돌진이 줄이는 걷기 시간 계산용
   simulation: { walkSpeed: 70, walkSec: 3.5, serviceSec: 60, potionStock: 200, seed: 20261011 },
 };

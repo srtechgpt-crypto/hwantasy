@@ -9,6 +9,7 @@ import { codexSet, codexPlan, codexReserved, titleDef, titleEarned, killsMax, do
 import { skillDef, skillLevel, skillUpCost, cardIdOf } from './skills.js';
 import { random } from './common.js';
 import { elixirOf, dollDef, recoverCost } from './growth.js';
+import { canWield, clsOf, className } from './classes.js';
 
 function transaction(save, bal, run) {
   if (!validate(save, bal).ok) return fail('저장 정보가 올바르지 않습니다');
@@ -86,9 +87,16 @@ export function equip(save, uid, bal) {
     const item = next.bag.find(item => item.uid === uid);
     const def = itemDef(item?.id, bal);
     if (!item || !isGearDef(def)) return fail('장착할 장비가 가방에 없습니다');
+    if (!canWield(def, clsOf(next), bal)) return fail(wieldReason(def, next, bal)); // 26차 ⑤ #10
     next.equip[slotOf(def)] = item.uid;
     return { ok: true, save: next };
   });
+}
+// 26차: 이 직업이 못 끼는 무기 안내(활 = 요정만, 대검·도끼 = 기사만)
+export function wieldReason(def, save, bal) {
+  const ok = Object.entries((bal?.classBase ?? bal).classes ?? {}).filter(([cls]) => canWield(def, cls, bal)).map(([cls]) => className(cls, bal));
+  const who = className(clsOf(save), bal), batchim = (who.charCodeAt(who.length - 1) - 0xac00) % 28 > 0;
+  return `${who}${batchim ? '은' : '는'} 낄 수 없습니다${ok.length ? ` (${ok.join('·')}만)` : ''}`;
 }
 // slot은 장착 칸(EQUIP_SLOTS). Equipped items already occupy their bag slot.
 export function unequip(save, slot, bal) {
@@ -694,7 +702,7 @@ export function applyLoadout(save, i, bal) {
       const uid = l.equip[sl];
       if (uid === null) { if (next.equip[sl] !== null) { next.equip[sl] = null; changed++; } continue; }
       const it = next.bag.find(x => x.uid === uid);
-      if (!it || slotOf(itemDef(it.id, bal)) !== sl) { missing++; continue; }
+      if (!it || slotOf(itemDef(it.id, bal)) !== sl || !canWield(itemDef(it.id, bal), clsOf(next), bal)) { missing++; continue; } // 26차: 못 끼는 무기도 '없음'
       if (next.equip[sl] !== uid) { next.equip[sl] = uid; changed++; }
     }
     // ⑤ #4: 바뀐 것이 없으면 저장하지 않고 이유(이미 같음 / 없어진 장비 N칸)를 알림

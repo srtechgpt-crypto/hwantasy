@@ -1,6 +1,9 @@
 // 「환타지」 시작점: 저장 불러오기, 화면(시작·메뉴·상태줄) 연결, Phaser 게임 띄우기.
 import bal from '../data/balance.js';
 import * as saveMod from './domain/save.js';
+import * as chars from './domain/chars.js';
+import { useClass } from './cbal.js';
+import { clsOf, className } from './domain/classes.js';
 import { WorldScene } from './scenes/World.js';
 import { initWindows } from './ui/windows.js';
 import { G, hud } from './state.js';
@@ -34,6 +37,8 @@ function showTitle() {
   const res = storage ? saveMod.loadSave(storage, bal) : { save: null, broken: [], warning: '이 브라우저는 저장을 막고 있습니다. 껐다 켜면 기록이 사라집니다.' };
   G.loaded = res;
   $('btnContinue').hidden = !res.save;
+  $('newChar').hidden = true;
+  drawChars(res.save, !!res.future || !!G.lockedByOtherTab);
   // 더 새 버전 기록이 있으면 이 버전으로는 시작하지 않는다(저장이 계속 실패해 멈추지 않게, 그 기록을 지키게)
   if (res.future) $('titleButtons').hidden = true;
   const warns = [];
@@ -44,18 +49,105 @@ function showTitle() {
   $('titleWarn').hidden = warns.length === 0;
 }
 
-$('btnContinue').onclick = () => startGame(G.loaded.save, false);
+// ---------- 26차 캐릭터 고르기 ----------
+// 카드 = 지금 캐릭터 + 명단(번호 순). 누르면 그 캐릭터로 바꿔 저장에 성공한 뒤에만 시작한다(⑤ #17). 6명이면 [＋ 새 캐릭터] 숨김
+function drawChars(save, blocked) {
+  const box = $('charList');
+  const list = save ? chars.charsOf(save) : [];
+  box.hidden = list.length < 1 || blocked;
+  box.innerHTML = list.map((c) => `<button type="button" class="charcard ${c.hero.cid === save.hero.cid ? 'cur' : ''}" data-cid="${c.hero.cid}">`
+    + `<img src="assets/class_${c.hero.cls}.png" alt=""><b>${c.hero.name.replace(/[<>&"]/g, '')}</b><small>Lv ${c.player.level} ${className(c.hero.cls, bal)}</small></button>`).join('');
+  $('btnAddChar').hidden = blocked || list.length >= (bal.maxChars ?? 6);
+  $('btnContinue').textContent = save && list.length > 1 ? `이어하기 · ${save.hero.name}` : '이어하기';
+}
+// 시작 화면에서 쓰는 저장: 늘 저장 공간을 다시 읽은 최신 기록(⑤ #6 — 오래된 화면 값으로 덮지 않게)
+function freshSave() {
+  if (!storage) return G.loaded?.save ?? null;
+  const r = saveMod.loadSave(storage, bal);
+  G.loaded = r;
+  return r.future ? null : r.save;
+}
+let titleBusy = false;
+// 후보 기록을 저장해 보고 성공하면 그 기록(seq·savedAt 붙은 것)으로 시작
+function writeAndStart(candidate, isNew) {
+  if (!canStartHere()) return false;
+  if (!storage) { startGame(candidate, isNew); return true; }
+  const r = saveMod.writeSave(storage, candidate);
+  if (!r.ok) { hud.toast(`저장하지 못해 시작하지 않았습니다: ${r.reason}`, 3600); return false; }
+  startGame(r.save, false, isNew);
+  return true;
+}
+$('charList').onclick = (e) => {
+  const b = e.target.closest('[data-cid]');
+  if (!b || titleBusy) return;
+  titleBusy = true;
+  try {
+    const cur = freshSave();
+    if (!cur) { hud.toast('기록을 다시 읽지 못했습니다'); showTitle(); return; }
+    const res = chars.switchChar(cur, Number(b.dataset.cid), bal);
+    if (!res.ok) { hud.toast(res.reason, 3000); showTitle(); return; }
+    if (res.save.hero.cid !== cur.hero.cid) writeAndStart(res.save, false);
+    else if (canStartHere()) startGame(cur, false);
+  } finally { titleBusy = false; }
+};
+let pickCls = 'knight';
+$('btnAddChar').onclick = () => {
+  $('titleButtons').hidden = true; $('newChar').hidden = false; $('ncWarn').hidden = true;
+  $('charName').value = '';
+  pickCls = 'knight';
+  document.querySelectorAll('#classPick .classcard').forEach((c) => c.classList.toggle('on', c.dataset.cls === pickCls));
+};
+$('classPick').onclick = (e) => {
+  const c = e.target.closest('[data-cls]');
+  if (!c) return;
+  pickCls = c.dataset.cls;
+  document.querySelectorAll('#classPick .classcard').forEach((x) => x.classList.toggle('on', x === c));
+};
+$('btnMakeNo').onclick = () => { $('newChar').hidden = true; $('titleButtons').hidden = false; };
+$('btnMakeChar').onclick = () => {
+  if (titleBusy) return;
+  const name = $('charName').value.trim();
+  const warn = (t) => { $('ncWarn').textContent = t; $('ncWarn').hidden = false; };
+  if (!saveMod.heroNameOk(name)) return warn('이름은 띄어쓰기 없이 1~8글자로 지어 주세요');
+  titleBusy = true;
+  try {
+    const cur = freshSave();
+    // 기록이 없으면 이 캐릭터 하나로 새 계정. 있으면 명단에 더한다(지금 캐릭터는 쉬러 감)
+    if (!cur) {
+      if (G.loaded?.future) return warn('더 새 버전의 기록이 있어 만들 수 없습니다');
+      writeAndStart(saveMod.newGame(bal, { cls: pickCls, name }), true);
+      return;
+    }
+    const res = chars.addChar(cur, pickCls, name, bal);
+    if (!res.ok) return warn(res.reason);
+    writeAndStart(res.save, true);
+  } finally { titleBusy = false; }
+};
+
+// ⑦ #1·#2: 이어하기도 저장 공간을 다시 읽은 최신 기록으로, 다른 창 잠금·더 새 버전이면 시작하지 않는다
+function canStartHere() {
+  if (G.lockedByOtherTab) { hud.toast('다른 창에서 이미 열려 있어 이 창에서는 시작할 수 없습니다', 2800); return false; }
+  return true;
+}
+$('btnContinue').onclick = () => {
+  if (titleBusy || !canStartHere()) return;
+  const cur = freshSave();
+  if (!cur) { hud.toast(G.loaded?.future ? '더 새 버전의 기록이 있습니다. 앱을 새 버전으로 열어 주세요' : '기록을 다시 읽지 못했습니다', 3000); showTitle(); return; }
+  startGame(cur, false);
+};
 $('btnNew').onclick = () => {
   const has = G.loaded?.save || G.loaded?.broken?.length;
-  if (!has) return startGame(saveMod.newGame(bal), true);
+  if (!has) { writeAndStart(saveMod.newGame(bal), true); return; } // ⑦ #4: 저장에 성공한 뒤 시작
+  const n = G.loaded.save ? chars.charsOf(G.loaded.save).length : 0;
   $('newConfirmText').textContent = G.loaded.save
-    ? `Lv ${G.loaded.save.player.level} 기사의 기록이 지워집니다. 정말 새로 할까요?`
+    ? (n > 1 ? `캐릭터 ${n}명과 창고가 모두 지워집니다. 캐릭터를 더 만들려면 [그만두기] 뒤 [＋ 새 캐릭터]를 누르세요. 정말 모두 지우고 새로 할까요?`
+      : `Lv ${G.loaded.save.player.level} ${G.loaded.save.hero.name}의 기록과 창고가 지워집니다. 캐릭터를 더 만들려면 [＋ 새 캐릭터]를 누르세요. 정말 새로 할까요?`)
     : '손상된 기록 대신 새로 시작합니다. 손상된 원본은 보관해 둡니다.';
   $('titleButtons').hidden = true;
   $('newConfirm').hidden = false;
 };
 $('btnNewNo').onclick = () => { $('newConfirm').hidden = true; $('titleButtons').hidden = false; };
-$('btnNewYes').onclick = () => startGame(saveMod.newGame(bal), true);
+$('btnNewYes').onclick = () => { writeAndStart(saveMod.newGame(bal), true); };
 
 // 2026-10-16: 상태줄이 두 줄이 되거나(버프가 아랫줄로) 화면이 바뀌면 알림은 왼쪽 묶음 아래, 작은 지도는 오른쪽 묶음 아래로
 function placeUnderHud() {
@@ -87,7 +179,9 @@ hud.relayout = placeUnderHud;
 addEventListener('resize', placeUnderHud);
 addEventListener('orientationchange', () => setTimeout(placeUnderHud, 300));
 
-function startGame(save, isNew) {
+// 26차: announceNew = 새 캐릭터 첫 입장 안내(이미 저장했으므로 다시 'new' 저장은 하지 않음)
+function startGame(save, isNew, announceNew = isNew) {
+  useClass(clsOf(save)); // 26차: 화면이 쓰는 밸런스를 이 캐릭터 직업으로
   G.save = save;
   G.started = true;
   $('title').hidden = true;
@@ -97,7 +191,7 @@ function startGame(save, isNew) {
   if (isNew) G.persist('new');
   syncUpdate(true);
   hud.rates(G.save.rates);
-  G.scene?.enterGame(isNew);
+  G.scene?.enterGame(announceNew);
 }
 
 // ---------- 메뉴 ----------
@@ -130,7 +224,13 @@ $('hudRate').onclick = openRates;
 $('quest').onclick = () => { if (G.started && !G.pending && G.pause.size === 0) G.ui.goQuest(); };
 $('btnResume').onclick = () => { $('menu').hidden = true; G.pause.delete('menu'); };
 $('btnSaveNow').onclick = () => { if (G.persist('menu')) hud.toast('저장했습니다'); };
-$('btnToTitle').onclick = () => { G.ui.close(); G.persist('title'); G.scene?.leaveGame(); showTitle(); G.pause.delete('menu'); };
+// 26차 ⑤ #19: 저장에 성공해야 처음 화면(캐릭터 고르기)으로 — 실패면 저장 실패 화면이 뜨고 게임에 남는다
+$('btnToTitle').onclick = () => {
+  if (G.pending) { hud.toast('저장이 끝나지 않은 일이 있습니다'); return; }
+  G.ui.close();
+  if (!G.persist('title')) return;
+  G.scene?.leaveGame(); G.pause.delete('menu'); showTitle();
+};
 $('btnExport').onclick = () => {
   G.scene?.syncPosition();
   $('ioBox').hidden = false;

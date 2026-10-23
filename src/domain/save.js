@@ -7,6 +7,7 @@ import { validMorph, emptyMorph } from './morph.js';
 import { validCodex, validKills, validQuest, validTitle, firstQuest, permOf } from './collect.js';
 import { validSkillLv } from './skills.js';
 import { elixirExtra, validElixir, validRecover, validDolls } from './growth.js';
+import { balForSave, classBal, canWield, isClassId } from './classes.js';
 
 // 저장 형식 버전. 2 = 2026-10-13 경험치 곡선 변경(초반 빠르게). 1 → 2는 '현재 레벨에서 채운 비율'로 변환한다.
 // 3 = 2026-10-14 4차: 보스 두 마리(boss → bosses 맵), 최대 레벨 40. 2 → 3은 v2 규칙으로 전부 검사한 뒤에만 바꾼다.
@@ -30,7 +31,9 @@ import { elixirExtra, validElixir, validRecover, validDolls } from './growth.js'
 // 16 = 2026-10-22 23차: 장신구 2칸(equip.ear·wrist, 장비 세트도 13칸)·23차 아이템(p23: 귀걸이·팔찌·영웅/전설)·선물 save.gifts(선택 필드).
 //      15 → 16은 v15 규칙(11칸·p23 없음·선물 없음)으로 검사한 뒤 두 칸(null)만 더한다
 // 17 = 2026-10-23 25차: 25차 아이템(p25: 경갑·로브·이름난 장비)·이름난 장비 도감 세트(p25). 16 → 17은 v16 규칙(p25 없음)으로 검사 후 버전만
-export const SAVE_VERSION = 17;
+// 18 = 2026-10-24 26차: 캐릭터 여러 명(save.hero = 지금 캐릭터 {cid, cls, name}, save.roster = 쉬는 캐릭터 묶음, 최대 6명)·창고 돈 save.wgold·
+//      직업(기사·요정)·활(p26). 17 → 18은 v17 규칙(활 없음)으로 검사한 뒤 hero 기사·roster []·wgold 0만 더한다
+export const SAVE_VERSION = 18;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
@@ -47,7 +50,9 @@ export const V12_BACKUP_KEY = 'hwantasy.v12backup';
 export const V13_BACKUP_KEY = 'hwantasy.v13backup';
 export const V14_BACKUP_KEY = 'hwantasy.v14backup';
 export const V15_BACKUP_KEY = 'hwantasy.v15backup';
-const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY, 8: V8_BACKUP_KEY, 9: V9_BACKUP_KEY, 10: V10_BACKUP_KEY, 11: V11_BACKUP_KEY, 12: V12_BACKUP_KEY, 13: V13_BACKUP_KEY, 14: V14_BACKUP_KEY, 15: V15_BACKUP_KEY };
+export const V16_BACKUP_KEY = 'hwantasy.v16backup';
+export const V17_BACKUP_KEY = 'hwantasy.v17backup'; // 26차 ⑤ #4: 저장 구조가 크게 바뀌므로 v16·v17 원문도 보관해야만 덮어쓴다
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY, 8: V8_BACKUP_KEY, 9: V9_BACKUP_KEY, 10: V10_BACKUP_KEY, 11: V11_BACKUP_KEY, 12: V12_BACKUP_KEY, 13: V13_BACKUP_KEY, 14: V14_BACKUP_KEY, 15: V15_BACKUP_KEY, 16: V16_BACKUP_KEY, 17: V17_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 export const V15_BOSSES = ['boss', 'lich', 'drake']; // 21차
@@ -166,7 +171,16 @@ export const no25 = b => {
     codex: b.codex?.filter(c => !c.p25 && c.items.every(id => !gone.has(id))),
   };
 };
-export const balFor = (bal, version) => (version === 17 ? bal : version === 16 ? no25(bal) : version === 15 ? no25(no23(bal)) : no25(no23(no21(balFor14(bal, version)))));
+// 26차: v17 이하 규칙 = 활(p26)·직업 없음(no26은 여러 번 써도 같음). 기사 밸런스에는 활 드랍이 없어 드랍 표는 그대로
+export const no26 = b => {
+  if (!b.weapons.some(def => def.p26) && !b.classes) return b;
+  const { classes: _classes, ...rest } = b;
+  return { ...rest, weapons: b.weapons.filter(def => !def.p26) };
+};
+export const balFor = (bal, version) => {
+  bal = bal?.classBase ?? bal; // ⑤ #8: 직업 보기를 넘겨도 원래 밸런스에서 고른다
+  return version === 18 ? bal : version === 17 ? no26(bal) : version === 16 ? no26(no25(bal)) : version === 15 ? no26(no25(no23(bal))) : no26(no25(no23(no21(balFor14(bal, version)))));
+};
 const balFor12 = (bal, version) => (version === 12 ? bal
   : version === 11 ? v11Bal(bal)
   : version === 10 ? v10Bal(bal)
@@ -178,33 +192,46 @@ const balFor12 = (bal, version) => (version === 12 ? bal
 
 // uid and nextUid are positive safe integers. Gear: {uid,id,count:1,enchant};
 // consumables: {uid,id,count}. Equip holds references to bag gear, never copies.
-export function newGame(bal) {
+// 26차: 새 게임 = 캐릭터 1명(기본 기사 '기사', cid 1)인 새 계정. opts = { cls, name }
+export function newGame(bal, opts = {}) {
+  bal = bal?.classBase ?? bal;
+  const save = {
+    version: SAVE_VERSION, seq: 0, savedAt: 0, warehouse: [], wgold: 0, roster: [],
+    rates: { exp: 1, drop: 1, gold: 1, enchant: 1 },
+    bosses: Object.fromEntries(V15_BOSSES.map(id => [id, null])), nextUid: 1,
+    gifts: (bal.gifts ?? []).map(g => g.id), // 23차: 새 계정은 지금 있는 선물을 받지 않는다
+  };
+  const ch = newCharFields(save, opts.cls ?? 'knight', opts.name ?? '기사', 1, bal);
+  return Object.assign(save, ch.fields, { nextUid: ch.nextUid });
+}
+// 26차 ⑤ #2: 새 캐릭터 필드(직업별 시작 장비·Lv1·마을). uid는 계정의 nextUid부터 차례로 — 가방 uid와 장착 참조를 함께 만든다.
+// 반환 { fields: 캐릭터 필드, nextUid }. 체력은 그 직업 능력치로(함께 쓰는 필드 version을 빌려 계산)
+export function newCharFields(account, cls, name, cid, bal) {
+  bal = bal?.classBase ?? bal;
+  const cb = classBal(bal, cls), start = cb.start, u0 = account.nextUid;
+  const count = 2 + start.items.length;
+  if (!Number.isSafeInteger(u0 + count)) throw new RangeError('아이템 번호 한도를 넘었습니다');
   const bag = [
-    { uid: 1, id: bal.start.weapon, count: 1, enchant: 0 },
-    { uid: 2, id: bal.start.armor, count: 1, enchant: 0 },
-    ...bal.start.items.map((item, i) => ({ uid: i + 3, ...item })),
+    { uid: u0, id: start.weapon, count: 1, enchant: 0 },
+    { uid: u0 + 1, id: start.armor, count: 1, enchant: 0 },
+    ...start.items.map((item, i) => ({ uid: u0 + 2 + i, ...item })),
   ];
   const equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, null]));
-  Object.assign(equip, { weapon: 1, armor: 2 });
-  const save = {
-    version: SAVE_VERSION, seq: 0, savedAt: 0,
-    player: { level: 1, exp: 0, hp: 0, gold: bal.start.gold, map: bal.town.id, x: bal.town.x, y: bal.town.y, bonus: { str: 0, dex: 0, con: 0 }, rewards: [] },
-    equip, bag, warehouse: [],
-    rates: { exp: 1, drop: 1, gold: 1, enchant: 1 },
-    bosses: Object.fromEntries(V15_BOSSES.map(id => [id, null])), nextUid: bag.length + 1,
+  Object.assign(equip, { weapon: u0, armor: u0 + 1 });
+  const fields = {
+    hero: { cid, cls, name },
+    player: { level: 1, exp: 0, hp: 0, gold: start.gold, map: bal.town.id, x: bal.town.x, y: bal.town.y, bonus: { str: 0, dex: 0, con: 0 }, rewards: [] },
+    equip, bag,
+    // 12차(⑤ #5): 새 필드를 먼저 넣고 체력을 계산한다
+    hotbar: defaultHotbar(1, cb), buffs: {}, morph: emptyMorph(), ...newCollect(1, cb),
   };
-  // 12차(⑤ #5): 새 필드를 먼저 넣고 체력을 계산한다
-  save.hotbar = defaultHotbar(1, bal);
-  save.buffs = {};
-  save.morph = emptyMorph();
-  Object.assign(save, newCollect(1, bal));
-  save.gifts = (bal.gifts ?? []).map(g => g.id); // 23차: 새 캐릭터는 지금 있는 선물을 받지 않는다
-  save.player.hp = statsOf(save, bal).maxHp;
-  return save;
+  fields.player.hp = statsOf({ version: SAVE_VERSION, ...fields }, bal).maxHp;
+  return { fields, nextUid: u0 + count };
 }
 const newCollect = (level, bal) => ({ codex: {}, kills: {}, title: null, quest: firstQuest(level, bal) });
 // 8차: 저장의 장착 장비·보너스로 계산한 능력치(v4 형식만). 12차: v8부터 도감·칭호 영구 효과(v7 이하는 0 — ⑤ #2·#5)
 export function statsOf(save, bal) {
+  bal = balForSave(bal, save); // 26차: 그 캐릭터 직업으로(⑤ #9)
   const equip = Object.fromEntries(EQUIP_SLOTS.map(slot => [slot, save.bag.find(item => item.uid === save.equip[slot]) ?? null]));
   return playerStats(save.player.level, equip, bal, save.player.bonus, elixirExtra(save), save.version >= 8 ? permOf(save, bal) : null); // 15차 엘릭서
 }
@@ -237,15 +264,58 @@ function validRestock(r, bal) {
   const keys = Object.keys(r);
   return keys.length > 0 && keys.every(id => (bal.restockItems ?? []).includes(id) && integer(r[id], 1, bal.inventory.stackMax));
 }
+// 26차: 캐릭터 필드(지금 캐릭터는 맨 위, 쉬는 캐릭터는 roster 안). 그 밖은 계정이 함께 쓰는 필드
+export const CHAR_KEYS = ['hero', 'player', 'equip', 'bag', 'hotbar', 'buffs', 'morph', 'codex', 'kills', 'title', 'quest'];
+export const CHAR_OPT = ['restock', 'skillLv', 'recover', 'dolls', 'loadouts'];
+export const CHAR_ALL = [...CHAR_KEYS, ...CHAR_OPT];
+export const V18_ONLY = ['hero', 'roster', 'wgold'];
+export const charPart = save => Object.fromEntries(CHAR_ALL.filter(k => Object.hasOwn(save, k)).map(k => [k, save[k]]));
+// 이름: 앞뒤·가운데 공백 없이 1~8글자(코드 포인트), 제어 문자 없음(가져오기가 공백을 지우므로 공백은 받지 않는다)
+export const heroNameOk = name => typeof name === 'string' && /^[^\s\p{Cc}]+$/u.test(name) && [...name].length >= 1 && [...name].length <= 8;
+const validHero = h => isRecord(h) && Object.getPrototypeOf(h) === Object.prototype && Object.keys(h).length === 3 && integer(h.cid, 1, 99) && isClassId(h.cls) && heroNameOk(h.name);
+// 26차 ⑤ #3: v18 = 계정 검사(명단 모양·창고 돈·캐릭터 번호·이름) + 캐릭터마다 기존 검사(그 직업 밸런스로, 창고는 첫 캐릭터 보기에서 한 번) + 전체 uid 검사
 export function validate(save, bal, version = SAVE_VERSION) {
+  bal = bal?.classBase ?? bal;
+  if (version < 18 || !isRecord(save) || save.version !== 18) return validateOne(save, bal, version);
+  const errors = [], bad = message => errors.push(message);
+  const roster = save.roster;
+  if (!Array.isArray(roster) || roster.length > (bal.maxChars ?? 6) - 1) return { ok: false, errors: ['캐릭터 명단이 올바르지 않습니다'] };
+  if (!integer(save.wgold, 0, bal.wgoldMax ?? 1e15)) bad('창고 돈이 올바르지 않습니다');
+  if (CHAR_KEYS.some(k => !Object.hasOwn(save, k))) return { ok: false, errors: [...errors, '지금 캐릭터 정보가 없습니다'] };
+  for (const c of roster) {
+    if (!isRecord(c) || Object.getPrototypeOf(c) !== Object.prototype || Object.keys(c).some(k => !CHAR_ALL.includes(k)) || CHAR_KEYS.some(k => !Object.hasOwn(c, k))) return { ok: false, errors: [...errors, '명단 캐릭터 형식이 올바르지 않습니다'] };
+  }
+  const chars = [charPart(save), ...roster];
+  if (!chars.every(c => validHero(c.hero))) return { ok: false, errors: [...errors, '캐릭터 정보(번호·직업·이름)가 올바르지 않습니다'] };
+  if (new Set(chars.map(c => c.hero.cid)).size !== chars.length) bad('캐릭터 번호가 겹칩니다');
+  if (new Set(chars.map(c => c.hero.name)).size !== chars.length) bad('캐릭터 이름이 겹칩니다');
+  const shared = Object.fromEntries(Object.entries(save).filter(([k]) => !CHAR_ALL.includes(k) && k !== 'roster'));
+  chars.forEach((c, i) => {
+    const r = validateOne({ ...shared, ...c, warehouse: i === 0 ? save.warehouse : [] }, classBal(bal, c.hero.cls), 18);
+    for (const e of r.errors) bad(i === 0 ? e : `${c.hero.name}: ${e}`);
+  });
+  // 모든 가방 + 창고의 uid는 서로 겹치지 않고, nextUid는 그 전부보다 크다
+  const seen = new Set();
+  let max = 0;
+  for (const it of [...chars.flatMap(c => (Array.isArray(c.bag) ? c.bag : [])), ...(Array.isArray(save.warehouse) ? save.warehouse : [])]) {
+    if (!isRecord(it) || !integer(it.uid, 1)) continue;
+    if (seen.has(it.uid)) bad('아이템 uid가 캐릭터·창고 사이에서 겹칩니다');
+    seen.add(it.uid); max = Math.max(max, it.uid);
+  }
+  if (integer(save.nextUid, 1) && save.nextUid <= max) bad('다음 uid는 기존 uid보다 커야 합니다');
+  return { ok: errors.length === 0, errors };
+}
+function validateOne(save, bal, version) {
   // 21차 ⑤ #5: 옛 버전을 지금 밸런스로 넘겨도 21차 것(최대 50·서리·p21)은 받지 않게(no21은 여러 번 써도 같음)
   if (version < 15 && isRecord(bal?.progression) && Array.isArray(bal.monsters)) bal = no21(bal); // ⑦ #1: 최대 레벨과 상관없이 늘 적용
   if (version < 16 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no23(bal); // 23차: 같은 방식
   if (version < 17 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no25(bal); // 25차 ⑤ #3: 새 도감 세트도 함께
+  if (version < 18 && Array.isArray(bal?.weapons)) bal = no26(bal); // 26차 ⑤ #5
   const errors = [];
   const bad = message => errors.push(message);
   if (!isRecord(save)) return { ok: false, errors: ['저장은 객체여야 합니다'] };
   if (save.version !== version) bad('지원하지 않는 저장 버전입니다');
+  if (version < 18 && V18_ONLY.some(k => Object.hasOwn(save, k))) bad('옛 버전 기록에 캐릭터 명단이 있습니다'); // 26차 ⑤ #5
   if (!integer(save.seq)) bad('저장 순번이 올바르지 않습니다');
   if (!integer(save.savedAt)) bad('저장 시각이 올바르지 않습니다');
   if (!integer(save.nextUid, 1)) bad('다음 uid가 올바르지 않습니다');
@@ -285,6 +355,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
       if (def.p21 && version < 15) bad('옛 버전 기록에 21차 아이템이 있습니다'); // 21차 ⑤ #5
       if (def.p23 && version < 16) bad('옛 버전 기록에 23차 아이템이 있습니다'); // 23차
       if (def.p25 && version < 17) bad('옛 버전 기록에 25차 아이템이 있습니다'); // 25차
+      if (def.p26 && version < 18) bad('옛 버전 기록에 26차 아이템이 있습니다'); // 26차
       if (!integer(item.count, 1, gear ? 1 : bal.inventory.stackMax)) bad('아이템 수량이 올바르지 않습니다');
       if (gear ? !integer(item.enchant, 0, enchantRule(def, bal).max) : item.enchant !== undefined) bad('아이템 강화 단계가 올바르지 않습니다');
       // 13차: 잠금은 v9 장비에만, 값은 true만(없으면 안 잠김)
@@ -303,6 +374,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
       if (uid === null) continue;
       const item = Array.isArray(save.bag) ? save.bag.find(item => isRecord(item) && item.uid === uid) : null;
       if (!integer(uid, 1) || !item || slotOf(itemDef(item.id, bal)) !== slot || used.has(uid)) { bad('장착 장비는 가방 안의 맞는 종류를 가리켜야 합니다'); equipOk = false; }
+      else if (version >= 18 && !canWield(itemDef(item.id, bal), save.hero?.cls, bal)) { bad('이 직업이 낄 수 없는 무기를 끼고 있습니다'); equipOk = false; } // 26차 ⑤ #10
       used.add(uid);
     }
   }
@@ -545,12 +617,25 @@ function v9to10(save, bal) {
   next.version = 10;
   return next;
 }
-// 25차: 모든 경로가 마지막에 v16→17을 지난다(v16까지는 23차 경로 그대로)
+// 17→18(26차): v17 규칙(활·직업 없음)으로 검사한 뒤 지금 캐릭터 = 기사 '기사'(cid 1), 명단 [], 창고 돈 0
+function v17to18(save, bal) {
+  const check = validate(save, balFor(bal, 17), 17);
+  if (!check.ok) throw new TypeError(`버전 17 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 18;
+  next.hero = { cid: 1, cls: 'knight', name: '기사' };
+  next.roster = [];
+  next.wgold = 0;
+  return next;
+}
+// 25차: 모든 경로가 마지막에 v16→17을 지난다(v16까지는 23차 경로 그대로). 26차: 그 뒤 v17→18
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
+  bal = bal?.classBase ?? bal;
   if (save.version === SAVE_VERSION) return clone(save);
-  if (save.version === 16) return v16to17(save, bal);
-  return v16to17(migrateTo16(save, bal), bal);
+  if (save.version === 17) return v17to18(save, bal);
+  if (save.version === 16) return v17to18(v16to17(save, bal), bal);
+  return v17to18(v16to17(migrateTo16(save, bal), bal), bal);
 }
 function migrateTo16(save, bal) {
   if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
@@ -604,8 +689,11 @@ function keepLegacyRaw(storage) {
   for (const [v, { raw }] of Object.entries(newest)) {
     const backupKey = BACKUP_KEYS[v];
     try {
-      if (storage.getItem(backupKey) === null) storage.setItem(backupKey, raw);
-      if (storage.getItem(backupKey) === null) throw new Error('보관 확인 실패');
+      const have = storage.getItem(backupKey);
+      if (have === null || have === '') storage.setItem(backupKey, raw);
+      // 26차 ⑦ #3: 처음 보관본(되돌림용)은 그대로 두고, 지금 덮어쓸 최신 원문이 그것과 다르면 _latest 칸에 보관·확인
+      else if (have !== raw) { storage.setItem(`${backupKey}_latest`, raw); if (storage.getItem(`${backupKey}_latest`) !== raw) throw new Error('최신 원문 보관 확인 실패'); }
+      if (!storage.getItem(backupKey)) throw new Error('보관 확인 실패');
     } catch (error) {
       return { ok: false, reason: `옛 기록을 따로 보관하지 못해 저장하지 않았습니다(${error?.message ?? '알 수 없는 오류'}). 폰 저장 공간을 확인해 주세요` };
     }
