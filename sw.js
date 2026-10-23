@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "d769c18e1e71";
+const VERSION = "8599ea2e7ea3";
 const FILES = {
   ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "assets/coin.png": "ad1f568bc66eeac3b601d36350157f1ab1eb2d44f5e47e721c37870f10a1290f",
@@ -271,7 +271,7 @@ const FILES = {
   "assets/ult_sword.png": "0f63c5f80c169f8812fd6805ec39b71c382adce7794822e7117cdc534e783519",
   "assets/출처.txt": "a98814b7064d1c9728acbf7de1e80c03da8faf0b1c1bf635b8fd3a75ce59537b",
   "data/balance.js": "afa870d795c68d0e23c929f556a3eecfd6543e20e1e75ca3efef60c98ac0907d",
-  "data/estimate.js": "6ba851eb90d36f867c0c5adc7c6cb14435447d0fdd9830c193af938c43330ac1",
+  "data/estimate.js": "d9e74ac1441ba972ffda14480943e06aafc131a34cbcc06cc4fa24cc6284ff07",
   "data/maps.js": "51b0a4aa8afe9f50b07ca3d3e7905033a93143c800d9895be8bc262c2bf1b457",
   "icons/icon-192.png": "c1e8a42f4760de72d5ba21a1d683111e137ab863893827b5c4e9ed2ceb86aaf2",
   "icons/icon-512.png": "f236786d645fb51e02640e919d146a79b8d47925599c924ccb86ef4ae34470c7",
@@ -286,7 +286,7 @@ const FILES = {
   "src/domain/common.js": "3a003b4896900108a651821ac4d183146a235527956d9475a8bf69e4676779db",
   "src/domain/compare.js": "b73e5b89c932fc0acfa4de5853ec45424012024268f3d4fe99240aa4c9c39725",
   "src/domain/daynight.js": "950b528554625b56bb0a5fa59e7371c2ff4d64e7057b9fe00a8a003b2bb86c98",
-  "src/domain/enchant.js": "0154d46a8c86eef3a7dc13a2445c0283e19038ddeb822b914e55fd6aa720296c",
+  "src/domain/enchant.js": "8332d320d4c4c02d036823a55b2f57d6d26d0369fd8d5385a2708198726d7251",
   "src/domain/growth.js": "be6e932c501822d356564ce2bf619cf8b440ede41be14672bf4cd65dd889a747",
   "src/domain/hotbar.js": "8793696e53d1ee5e40dbc1ae46b7a85f7f9108755b8b4376787aa80d4979d446",
   "src/domain/inventory.js": "8e042cf7fcc8d264dd8338af106a7a6d57f7581ac47ca9769366586c69b7e0db",
@@ -301,12 +301,12 @@ const FILES = {
   "src/scenes/World.js": "1a6eb469fc77fc487a6d66927a1af11884961dbb4bc33e04fa365d1d04950cfc",
   "src/state.js": "9006be7df35f308381e9b109d9e547dbd06626b8d53e1abd9ccfa74c17163223",
   "src/ui/format.js": "3e21f5a6a31fc215b975bea062039e46d6577bc144574bb8f86ce3dd45c456f7",
-  "src/ui/hud.css": "8af89292e1c7da6b9eda1f3d93e7764fbfb998df41c0ab7d4a4f29d148f26a3a",
+  "src/ui/hud.css": "eb1d918e04b8ef0b4dc9210ad01fcc3461836e2b90e789c130708af238e21786",
   "src/ui/joystick.js": "2ae2f192bd005a5bb140c03a67ad5b401c2b3f7c474d6293a33ddccb8937158c",
   "src/ui/minimap.js": "fb1e196361c8afd9b76da6af053c5c3416237a5f71d537867a45c8c513270a45",
   "src/ui/prefs.js": "bb92e4b435b88bff8449aad908b60c82f8a10e5adb2c7375e040e9e2cc0160f7",
   "src/ui/skillfx.js": "61e18be85fa38b398c81a913d067a519db5d5cbd325c3639aa242f51cc7a3fd5",
-  "src/ui/windows.js": "3e1ae2fe24309bfb93d40e61004abae44c9e01de314437956e3ba45e3562a872",
+  "src/ui/windows.js": "cee3e265659b638589042851ccb0e31e57f71475d03f6934193f04304e95eb27",
   "src/ui/worldmap.js": "e29a3d789f20b6dfbd18651f8c9eb34e51fe1062db84b17322a2b0b763f7ac02",
   "vendor/phaser.min.js": "e92ddef111ba42e92d316979c732311757093688ea1810591cb7aa2858eba7a7"
 };

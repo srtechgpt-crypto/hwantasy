@@ -2,7 +2,7 @@
 // 모든 거래는 domain 함수로 새 save 후보를 만들고 G.commit으로 "저장에 성공했을 때만" 확정한다.
 import bal, { WEAPON_TYPES } from '../../data/balance.js';
 import * as inv from '../domain/inventory.js';
-import { enchantInfo, tryEnchant, enchantPlan, enchantTo, blessedPlan, tryBlessed, lowerEnchant, blessedScrollOf } from '../domain/enchant.js';
+import { enchantInfo, tryEnchant, enchantPlan, enchantTo, blessedPlan, tryBlessed, lowerEnchant, blessedScrollOf, sameGearCandidates, enchantManyPlan, enchantMany } from '../domain/enchant.js';
 import { morphDef, unmorph, rollText } from '../domain/morph.js';
 import { itemDef, isGearDef, slotOf, EQUIP_SLOTS, enchantRule } from '../domain/common.js';
 import { compareGear, compareDetail, loadoutStats } from '../domain/compare.js';
@@ -146,7 +146,7 @@ export function initWindows() {
   function halfTick() {
     if (!cur?.half) { clearInterval(halfTimer); halfTimer = 0; return; }
     const sig = sigOf(G.save);
-    if (sig === lastSig || cur.busy || cur.confirm || cur.bconfirm || cur.bless || G.pending) return;
+    if (sig === lastSig || cur.busy || cur.confirm || cur.bconfirm || cur.bless || cur.mconfirm || G.pending) return;
     lastSig = sig;
     render();
   }
@@ -513,22 +513,23 @@ export function initWindows() {
       .map(([k, n, c]) => `<button type="button" class="chip ${cur.scrollKind === k ? 'on' : ''}" data-act="skind" data-k="${k}">${esc(n.replace(' 주문서', ''))} ${won(c)}</button>`).join('')}</div>`;
     const list = gear.map((g) => `<button type="button" class="row-item ${g.uid === it.uid ? 'on' : ''}" data-act="sel" data-where="bag" data-uid="${g.uid}">${icon(g.id)}<span>${g.lock ? '🔒 ' : ''}${esc(itemName(g))}</span>${equipped(s, g.uid) ? '<em>장착</em>' : ''}</button>`).join('');
     // 13차: 잠긴 장비는 강화 버튼 대신 안내 + [잠금 풀기]
-    if (it.lock) return `<div class="split ench-split"><div class="list" data-keep="elist">${list}</div><div class="side">${fxBox}<div class="ench"><div class="ench-top">${icon(it.id, 'big')}<div><h3>${esc(itemName(it))}</h3></div></div>${LOCK_HINT}<div class="btns">${lockBtn(it)}</div></div></div></div>`;
+    if (it.lock) return `<div class="split ench-split"><div class="list" data-keep="elist">${list}</div><div class="side">${fxBox}<div class="ench"><div class="ench-top">${icon(it.id, 'big')}<div><h3>${esc(itemName(it))}</h3></div></div>${LOCK_HINT}<div class="btns">${lockBtn(it)}</div>${cur.scrollKind === 'normal' ? manyBox(s, it) : ''}</div></div></div>`;
     let center;
-    if (info.next === null) center = `${fxBox}<p class="hint big">${esc(josa(itemName(it), '은/는'))} 최대 강화 단계입니다.</p>`;
+    if (info.next === null) center = `${fxBox}<p class="hint big">${esc(josa(itemName(it), '은/는'))} 최대 강화 단계입니다.</p>${manyBox(s, it)}`;
     else {
       const pct = Math.round(info.chance * 1000) / 10;
       const confirming = cur.confirm && cur.confirm.uid === it.uid && cur.confirm.level === it.enchant;
       center = `<div class="ench">
         <div class="ench-top">${icon(it.id, 'big')}<div><h3>${esc(itemDef(it.id, bal).name)} <b>+${info.current}</b> → <b class="gold-t">+${info.next}</b></h3>
           <p>${info.safe ? '<span class="ok-t">안전 단계 · 반드시 성공</span>' : `성공 <b>${pct}%</b> · <span class="bad-t">실패하면 ${esc(josa(itemDef(it.id, bal).name, '이/가'))} 사라집니다</span>`}</p>
-          <p class="sub-t">${itemDef(scrollId, bal).name} ${won(scrolls)}장${s.rates.enchant !== 1 ? ` · 강화 배율 ×${s.rates.enchant} 반영` : ''}</p></div></div>
+          <p class="sub-t">${itemDef(scrollId, bal).name} ${won(scrolls)}장${s.rates.enchant !== 1 ? ` · 강화 배율 ×${s.rates.enchant} 반영` : ''}</p>${manyJump(s, it)}</div></div>
         ${fxBox}
         ${scrolls < 1 ? `<p class="hint">${josa(itemDef(scrollId, bal).name, '이/가')} 없습니다. 잡화상에서 살 수 있습니다.</p>`
           : confirming ? `<div class="warnbox"><p>정말 강화할까요? 실패하면 <b>${esc(josa(itemName(it), '이/가'))}</b> <b>사라집니다</b>.</p>
               <div class="btns"><button type="button" class="act danger" data-act="doEnchant" ${cur.busy ? 'disabled' : ''}>그래도 강화</button><button type="button" class="act" data-act="cancelConfirm">그만두기</button></div></div>`
           : `<div class="btns"><button type="button" class="act ${info.safe ? 'primary' : 'danger'}" data-act="${info.safe ? 'doEnchant' : 'askEnchant'}" ${cur.busy ? 'disabled' : ''}>강화하기</button></div>`}
         ${scrolls >= 1 && !confirming ? batchBox(s, it, info, scrolls) : ''}
+        ${!confirming ? manyBox(s, it) : ''}
       </div>`;
     }
     if (cur.scrollKind === 'blessed') center = blessedBox(s, it, info, bId, fxBox);
@@ -619,6 +620,88 @@ export function initWindows() {
     }
     return `<div class="batch"><h4>한 번에 강화</h4>${safeBtn}${body}</div>`;
   }
+  // 24차 같은 장비 함께 강화: 고른 장비와 같은 종류(같은 id)·안 낌·안 잠김 장비가 2개 이상이면 보임.
+  // 칩으로 빼고 넣기(cur.many.off), 목표 ◀▶(cur.many.t). 위험 단계가 있으면 확인 — 확인은 계획 서명(종류·주문서 종류·목표·배율·쓸 수 있는 주문서 수·장비 uid:단계)에 묶음 — 자동 사냥이 주문서를 주워도 넉넉하면 그대로
+  function manyState(s, it) {
+    const cands = sameGearCandidates(s, it.id, bal);
+    if (cands.length < 2) return null;
+    if (!cur.many || cur.many.id !== it.id) cur.many = { id: it.id, off: new Set(), t: null };
+    const m = cur.many, info = enchantInfo(cands[0], s.rates, bal);
+    const lo = Math.min(...cands.map((c) => c.enchant)) + 1;
+    if (m.t === null || m.t < lo || m.t > info.max) m.t = Math.min(info.max, Math.max(lo, info.safeMax));
+    const on = cands.filter((c) => c.enchant < m.t && !m.off.has(c.uid));
+    let plan = null;
+    if (on.length >= 2) { try { plan = enchantManyPlan(s, on.map((c) => c.uid), m.t, bal); } catch { plan = null; } }
+    const sig = plan ? `${plan.id}|${plan.scrollId}|${m.t}|${s.rates.enchant}|${Math.min(plan.have, plan.need)}|${plan.items.map((x) => `${x.uid}:${x.from}`).join(',')}` : '';
+    return { cands, m, info, lo, on, plan, sig };
+  }
+  // 상자가 아래에 있어 눈에 안 띄므로 위에 바로가기(같은 종류 2개 이상일 때)
+  function manyJump(s, it) {
+    const n = sameGearCandidates(s, it.id, bal).length;
+    return n >= 2 ? `<button type="button" class="chip mjump" data-act="manyJump">같은 장비 ${won(n)}개 함께 강화 ↓</button>` : '';
+  }
+  function manyBox(s, it) {
+    const st = manyState(s, it);
+    if (!st) return '';
+    const { cands, m, info, lo, on, plan, sig } = st;
+    const name = itemDef(it.id, bal).name, pct = (x) => `${Math.round(x * 1000) / 10}%`, loss = (x) => (Math.round(x * 10) / 10).toLocaleString('ko-KR');
+    const hiddenN = s.bag.filter((i) => i.id === it.id).length - cands.length;
+    const chips = cands.map((c) => {
+      const below = c.enchant < m.t, picked = below && !m.off.has(c.uid);
+      return `<button type="button" class="chip mchip ${picked ? 'on' : ''}" data-act="manyTog" data-uid="${c.uid}" ${below ? '' : 'disabled'} aria-pressed="${picked}">${icon(c.id)}+${c.enchant}</button>`;
+    }).join('');
+    const sc = itemDef(info.scrollId, bal).name;
+    let foot;
+    if (!plan) foot = `<p class="sub-t">2개 이상 골라 주세요${on.length === 1 ? ' (지금 1개)' : ''}.</p>`;
+    else if (plan.have < 1) foot = `<p class="hint">${josa(sc, '이/가')} 없습니다. 잡화상에서 살 수 있습니다.</p>`;
+    else {
+      const short = plan.have < plan.need;
+      if (cur.mconfirm === sig) {
+        const risky = [...new Map(plan.items.flatMap((x) => x.plan.steps.slice(0, plan.have)).filter((x) => !x.safe).map((x) => [x.level, x])).values()].sort((a, b) => a.level - b.level);
+        foot = `<div class="warnbox"><p><b>${esc(name)} ${won(on.length)}개</b>를 <b class="gold-t">+${m.t}</b>까지 함께 강화합니다. 주문서 최대 ${won(plan.maxUse)}장${short ? ' (모자라서 단계 높은 것부터 하고, 떨어지면 나머지는 손대지 않음)' : ''}. 실패로 일찍 끝난 장비 몫은 다음 장비가 씁니다.</p>
+          <p>위험 단계 성공률: ${risky.map((x) => `+${x.level} ${pct(x.chance)}`).join(' · ')} · 예상 사라짐 약 <b class="bad-t">${loss(plan.expectLoss)}개</b></p>
+          <p class="bad-t"><b>위험 단계에서 실패한 장비는 사라집니다(다른 장비는 계속 강화).</b></p>
+          <div class="btns"><button type="button" class="act danger" data-act="manyGo" data-sig="${esc(sig)}" ${cur.busy ? 'disabled' : ''}>그래도 강화</button><button type="button" class="act" data-act="manyNo">그만두기</button></div></div>`;
+      } else {
+        const line = `${won(on.length)}개 · ${esc(sc)} ${won(plan.need)}장 필요(가진 것 ${won(plan.have)}장)${short ? ' → <b class="bad-t">모자라면 단계 높은 것부터 하고 멈춤</b>' : ''}${plan.risky ? ` · <span class="bad-t">위험 단계 포함 · 예상 사라짐 약 ${loss(plan.expectLoss)}개</span>` : ' · 모두 안전 단계 · 반드시 성공'}`;
+        foot = `<p class="sub-t">${line}</p><div class="btns"><button type="button" class="act ${plan.risky ? 'danger' : 'primary'}" data-act="manyAsk" data-sig="${esc(sig)}" ${cur.busy ? 'disabled' : ''}>${won(on.length)}개 +${m.t}까지 함께 강화</button></div>`;
+      }
+    }
+    return `<div class="batch many"><h4>같은 장비 함께 강화 <small>${esc(name)} · 끼지 않은 것만</small></h4>
+      <div class="btrow"><span>목표</span><button type="button" class="rbtn" data-act="mt" data-d="-1" ${m.t <= lo ? 'disabled' : ''}>◀</button><b class="gold-t">+${m.t}</b><button type="button" class="rbtn" data-act="mt" data-d="1" ${m.t >= info.max ? 'disabled' : ''}>▶</button><small class="sub-t">눌러서 빼고 넣기</small></div>
+      <div class="chips mchips">${chips}</div>${hiddenN > 0 ? `<p class="sub-t">끼고 있거나 잠긴 것·최대 단계 ${won(hiddenN)}개는 빠집니다.</p>` : ''}${foot}</div>`;
+  }
+  // 실행: 화면에 보인 계획(서명)과 지금 계획이 같을 때만. 막힘 검사는 굴리기 전에(한 번에 강화와 같은 순서)
+  function doMany(sigShown, confirmed) {
+    if (cur.busy) return;
+    const s = G.save, it = selected(s);
+    const st = it ? manyState(s, it) : null;
+    if (!st?.plan || st.sig !== sigShown) { cur.mconfirm = null; msg('고른 장비가 바뀌었습니다. 다시 확인해 주세요', true); render(); return; }
+    if (G.pending || G.lockedByOtherTab) { msg('지금은 강화할 수 없습니다', true); return; }
+    if (!G.storage) { msg('이 브라우저는 저장이 막혀 있어 강화할 수 없습니다', true); return; }
+    if (st.plan.risky && !(confirmed && cur.mconfirm === st.sig)) { cur.mconfirm = st.sig; render(); return; }
+    const name = itemDef(st.m.id, bal).name;
+    const res = enchantMany(s, st.on.map((c) => c.uid), st.m.t, G.scene.rng, bal);
+    if (!res.ok) { msg(res.reason, true); return; }
+    cur.busy = true; cur.mconfirm = null; cur.confirm = null; cur.bconfirm = null;
+    const parts = [`+${res.target} 성공 ${res.done}`];
+    if (res.lost) parts.push(`사라짐 ${res.lost}`);
+    const pr = res.results.find((x) => x.stop === 'noScroll');
+    if (pr) parts.push(`주문서 모자라 +${pr.to}에서 멈춤 1`);
+    if (res.untouched) parts.push(`손대지 않음 ${res.untouched}`);
+    const text = `함께 강화 ${res.results.length}개: ${parts.join(' · ')} (주문서 ${res.used}장)`;
+    const selGone = res.results.some((x) => x.stop === 'destroyed' && x.uid === it.uid);
+    const ok = deal(res, 'enchant', {
+      mustSave: true,
+      after: () => {
+        if (cur) { cur.busy = false; cur.fx = { kind: res.lost ? 'broke' : 'up', text }; if (selGone) cur.sel = null; }
+        hud.log(res.lost ? `<span style="color:#ff8a7a">${name} ${text}</span>` : `<b style="color:#e0a63e">${name} ${text}</b>`);
+        for (const x of res.results) if (x.stop !== 'skipped') pushEnchantLog({ name, from: x.from, to: x.stop === 'destroyed' ? x.failAt : x.to, kind: '함께', ok: x.stop !== 'destroyed' });
+      },
+    });
+    if (!ok && !G.pending && cur) cur.busy = false;
+  }
+
   // 실행: 거래가 가능한지 먼저 확인하고(⑤ #3 — 굴린 뒤 거절되지 않게) 한 거래로 저장(mustSave)
   function doBatch(target, needConfirm) {
     if (cur.busy) return;
@@ -1504,6 +1587,13 @@ export function initWindows() {
       case 'batchAsk': cur.fx = null; cur.bt = Number(d.t); doBatch(cur.bt, true); return; // 화면에 보인 목표 그대로
       case 'batchGo': cur.bt = Number(d.t); doBatch(cur.bt, true); return;
       case 'batchNo': cur.bconfirm = null; break;
+      // 24차 같은 장비 함께 강화
+      case 'manyTog': { if (!cur.many) return; const u = Number(d.uid); if (cur.many.off.has(u)) cur.many.off.delete(u); else cur.many.off.add(u); cur.mconfirm = null; msg(''); break; }
+      case 'mt': if (!cur.many) return; cur.many.t += Number(d.d); cur.mconfirm = null; msg(''); break;
+      case 'manyAsk': cur.fx = null; doMany(d.sig, false); return;
+      case 'manyGo': doMany(d.sig, true); return;
+      case 'manyNo': cur.mconfirm = null; break;
+      case 'manyJump': document.querySelector('#win .batch.many')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); return;
       case 'doEnchant': doEnchant(); return;
       case 'tele': doTeleport(d.id); return;
       case 'askJunk': cur.junk = junkInfo(s, inv.junkGear(s, bal)); cur.sel = null; msg(''); break;

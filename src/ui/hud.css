@@ -558,3 +558,10 @@ b.grade.g-common { color: #c8cad4; } b.grade.g-uncommon { color: #7fdc8a; } b.gr
 .loadout .act.x { padding: 2px 8px; }
 .loadouts { margin-bottom: 6px; }
 .loadout.editing input { width: 9em; padding: 4px 6px; font-size: 14px; border-radius: 6px; border: 1px solid var(--gold); background: rgba(0,0,0,.4); color: var(--parch); }
+/* 24차 같은 장비 함께 강화 */
+.batch.many h4 small { color: var(--muted); font-weight: normal; margin-left: 4px; }
+.mchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mchip { display: inline-flex; align-items: center; gap: 4px; }
+.mchip img { width: 20px; height: 20px; image-rendering: pixelated; }
+.mchip:disabled { opacity: .4; }
+.mjump { margin-top: 4px; color: var(--gold); border-color: #6a5a32; }
