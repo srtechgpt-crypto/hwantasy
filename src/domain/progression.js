@@ -80,7 +80,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
   const gear = { def: 0, hp: 0, hit: 0, dmg: 0, regen: 0 };
   let weapon = null, wdef = null;
   const defs = [];
-  let gearHpPct = 0;
+  let gearHpPct = 0, gearCrit = 0, gearAtkPct = 0, gearMovePct = 0;
   for (const slot of EQUIP_SLOTS) {
     const item = equip[slot];
     if (item === null || item === undefined) continue;
@@ -91,6 +91,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
     gear.def += (def.def ?? 0) + item.enchant;
     gear.hp += def.hp ?? 0; gear.hit += def.hit ?? 0; gear.dmg += def.dmg ?? 0; gear.regen += def.regen ?? 0;
     gearHpPct += def.hpPct ?? 0; // 23차 영웅·전설 갑옷
+    gearCrit += def.crit ?? 0; gearAtkPct += def.atkPct ?? 0; gearMovePct += def.movePct ?? 0; // 25차 경갑·이름난 방어구
   }
   // 10차 세트 효과는 장비 합에 더한다(최대 체력·방어·피해), 치명은 따로
   const sets = activeSets(defs, bal);
@@ -105,7 +106,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
   const pmHp = perm?.hp ?? 0, pmDef = perm?.def ?? 0, pmDmg = perm?.dmg ?? 0, pmHit = perm?.hit ?? 0;
   const hpBase = k.baseHp + k.hpPerLevel * (level - 1) + st.hpPerCon * con + gear.hp + pmHp;
   const atkBase = Math.round(k.attackMs * (1 - st.atkMsPerDex * dex));
-  const atkPct = pm.atkPct + (wdef?.atkPct ?? 0); // 23차: 영웅·전설 단검의 간격 −%는 패시브와 더한다
+  const atkPct = pm.atkPct + (wdef?.atkPct ?? 0) + gearAtkPct; // 23차: 영웅·전설 단검의 간격 −%는 패시브와 더한다. 25차: 방어구 합도 더함
   return {
     ...a, points: bonusPoints(level, bal),
     maxHp: Math.floor((hpBase * (100 + pm.hpPct + gearHpPct)) / 100),
@@ -118,8 +119,9 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
     attackMsRaw: (atkBase * (100 - atkPct) * speed) / 10000,
     minAttackMs: Math.round((st.minAttackMs * speed) / 100),
     dmgPct: wdef?.dmgPct ?? 0,
-    critPct: pm.critPct + setCrit + (wdef?.crit ?? 0), lowHpReduce: pm.lowHpReduce, lowHpRatio: pm.lowHpRatio,
+    critPct: pm.critPct + setCrit + (wdef?.crit ?? 0) + gearCrit, lowHpReduce: pm.lowHpReduce, lowHpRatio: pm.lowHpRatio,
     stealPct: wdef?.stealPct ?? 0, // 23차 흡혈(때린 피해의 %, World.strike)
+    movePct: gearMovePct, // 25차 이동 속도 %(World.moveSpeed, 변신과 더함). 시뮬레이터는 걷는 시간 고정
     regenPerTick: k.regenBase + Math.floor(level / k.regenDivisor) + Math.floor(con / st.conPerRegen) + gear.regen,
     regenMs: k.regenMs,
     weapon: weapon ?? { min: bal.combat.bareMin, max: bal.combat.bareMax, enchant: 0 },

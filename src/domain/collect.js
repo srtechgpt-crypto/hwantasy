@@ -79,8 +79,15 @@ export const titleProgress = (t, save, bal) => ({ have: t.kind === 'kills' ? (sa
 // ---------- 영구 효과 ----------
 const ZERO = () => ({ hp: 0, def: 0, dmg: 0, hit: 0, expPct: 0, goldPct: 0 });
 // 다 채운 도감 세트 효과 합 + 쓰는 칭호 효과. v7 이하 기록(필드 없음)은 0
+// 25차: 낀 장비의 경험치·돈 %도 더한다(도감·칭호·인형과 합쳐 bonusExp·bonusGold가 한 번 곱함). 장비의 체력·방어·피해·명중은
+// playerStats가 이미 장비로 세므로 여기에는 더하지 않는다(두 번 세지 않게 — ⑤ #7)
 export function permOf(save, bal) {
   const out = ZERO();
+  for (const uid of Object.values(save?.equip ?? {})) {
+    if (uid === null || uid === undefined) continue;
+    const def = itemDef(save.bag?.find(i => i.uid === uid)?.id, bal);
+    out.expPct += def?.expPct ?? 0; out.goldPct += def?.goldPct ?? 0;
+  }
   if (!save?.codex) return out;
   const add = fx => { for (const k of Object.keys(out)) out[k] += fx?.[k] ?? 0; };
   for (const set of doneSets(save.codex, bal)) add(set.fx);

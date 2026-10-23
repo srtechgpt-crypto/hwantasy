@@ -779,7 +779,11 @@ export class WorldScene extends Phaser.Scene {
     return loadoutStats(G.save, bal);
   }
   // 11차 이동 속도(변신): 기본 SPEED × (100 + movePct)/100
-  moveSpeed() { const d = G.save.morph?.cur ? morphDef(G.save.morph.cur.id, bal) : null; return SPEED * (100 + (d?.movePct ?? 0)) / 100; }
+  // 25차: 이동 % = 변신 + 장비(loadoutStats.movePct에 둘 다 — 매 프레임 계산하지 않게 G.save가 바뀔 때만 다시)
+  moveSpeed() {
+    if (this.moveCache?.save !== G.save || this.moveCache.morph !== G.save.morph?.cur?.id) this.moveCache = { save: G.save, morph: G.save.morph?.cur?.id, pct: this.stats().movePct ?? 0 };
+    return SPEED * (100 + this.moveCache.pct) / 100;
+  }
 
   // ---------- 11차 변신 ----------
   tickMorphTime(dtMs) {
@@ -1404,12 +1408,14 @@ export class WorldScene extends Phaser.Scene {
     sprite.setDepth(9);
     // 10차: 희귀는 땅에서 반짝임(크기 숨쉬기) + 알림
     const gd = kind === 'item' ? bal.armors.concat(bal.weapons).find((d) => d.id === id) : null;
-    if (gd?.rare || gd?.rank) {
+    if (gd?.rare || gd?.rank || gd?.named) {
       this.tweens.add({ targets: sprite, scale: { from: 0.75, to: 0.95 }, duration: 520, yoyo: true, repeat: -1, delay: 280 });
       // 23차: 영웅(보라)·전설(주황) 장비는 더 크게 알림
-      const label = gd.rank === 'legend' ? '전설' : gd.rank === 'hero' ? '영웅' : '희귀';
-      hud.toast(`${gd.rank ? '✨ ' : ''}${label} 장비 ${nameOf(id)}이(가) 떨어졌습니다!`, gd.rank ? 4000 : 2600);
-      if (gd.rank) { sprite.setTint(gd.rank === 'legend' ? 0xffb050 : 0xd090ff); hud.log(`${label} 장비 ${nameOf(id)}이(가) 떨어졌습니다!`); }
+      // 25차: 이름난 장비(청록)도 크게 알리고 로그에 남김
+      const label = gd.rank === 'legend' ? '전설' : gd.rank === 'hero' ? '영웅' : gd.named ? '이름난' : '희귀';
+      const big = gd.rank || gd.named;
+      hud.toast(`${big ? '✨ ' : ''}${label} 장비 ${nameOf(id)}이(가) 떨어졌습니다!`, big ? 4000 : 2600);
+      if (big) { sprite.setTint(gd.rank === 'legend' ? 0xffb050 : gd.rank === 'hero' ? 0xd090ff : 0x7ff0d0); hud.log(`<span style="color:${gd.named ? '#6fe3c6' : 'inherit'}">${label} 장비 ${nameOf(id)}이(가) 떨어졌습니다!</span>`); }
     }
     this.tweens.add({ targets: sprite, x: tx, duration: 260, ease: 'Linear' });
     this.tweens.add({ targets: sprite, y: { from: y - 2, to: ty }, duration: 260, ease: 'Bounce.easeOut' });

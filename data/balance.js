@@ -156,6 +156,65 @@ for (const d of [...heroItems, ...legendItems]) (d.kind === 'weapon' ? weapons :
 const rankPool = (list, t) => list.filter(d => d.tier === t).map(d => d.id);
 export const HERO_POOLS = { 4: rankPool(heroItems, 4), 5: rankPool(heroItems, 5) };
 export const LEGEND_POOLS = { 4: rankPool(legendItems, 4), 5: rankPool(legendItems, 5) };
+// 25차 큰 갑옷 계열: 지금 줄 = 중갑(line 없음), 경갑(light: 방어 낮음 + 명중·공격 간격 −%), 로브(robe: 방어 낮음 + 체력·회복).
+// 희귀·영웅·전설 목록을 만든 뒤에 넣어 RARE/HERO/LEGEND_POOLS 내용이 그대로. 값은 같은 등급 중갑과 같고 모두 대장장이 판매(드랍 없음) [가정]
+export const ARMOR_LINES = [
+  { line: 'heavy', noun: '중갑', desc: '방어가 가장 높음' },
+  { line: 'light', noun: '경갑', desc: '가볍고 빠름 · 명중·공격 속도' },
+  { line: 'robe', noun: '로브', desc: '방어는 낮고 체력·회복' },
+];
+const LINE_ROWS = {
+  light: [['사냥꾼 가죽옷', 2, { hit: 2, atkPct: 2 }], ['그림자 가죽옷', 4, { hit: 3, atkPct: 3 }], ['정찰병 경갑', 6, { hit: 4, atkPct: 3 }], ['미스릴 경갑', 7, { hit: 5, atkPct: 4 }], ['서리강 경갑', 9, { hit: 6, atkPct: 5 }]],
+  robe: [['수련자 로브', 1, { hp: 15, regen: 1 }], ['현자의 로브', 2, { hp: 25, regen: 2 }], ['마력 로브', 4, { hp: 40, regen: 2 }], ['미스릴 로브', 6, { hp: 50, regen: 2 }], ['서리 로브', 8, { hp: 70, regen: 3 }]], // 비교 점수(전투력)가 같은 등급 중갑보다 조금 낮게(⑤ 결정 12 — 시뮬레이터)
+};
+const HEAVY_BY_TIER = [1, 2, 3, 4, 5].map(t => armors.find(d => d.slot === 'armor' && d.tier === t && !d.rare && !d.rank));
+for (const [line, list] of Object.entries(LINE_ROWS)) {
+  list.forEach(([name, def, fx], i) => armors.push({
+    id: `${line}Armor${i + 1}`, name, kind: 'armor', slot: 'armor', line, tier: i + 1, def, ...fx,
+    price: HEAVY_BY_TIER[i].price, shop: true, sellRate: 0.25, p25: true,
+  }));
+}
+// 25차 이름난 장비: 몬스터마다 1개(그 몬스터만 떨어뜨림, drops 맨 끝). tier 없음(세트·희귀 목록·세트 후보에 안 셈 — 망령검처럼), 상점 없음.
+// 무기는 그 지역 등급 같은 계열 무기를 복사(계열 성격 dmgPct·speedPct·crit·hit 그대로 — ⑤ #5)해 최소·최대 ×1.15 올림 + 효과(치명은 더함).
+// 방어구 효과 필드: def·hp·hit·dmg·regen·crit·atkPct·movePct·expPct·goldPct·hpPct [가정]
+const NAMED_ROWS = [
+  ['jelly', 'jellyRing', '말랑 젤리 반지', 'ring', 1, { hp: 30, regen: 1 }],
+  ['mouse', 'mouseBoots', '들쥐 가죽 부츠', 'boots', 1, { def: 1, movePct: 8 }],
+  ['hopfrog', 'frogCloak', '개굴 망토', 'cloak', 1, { def: 1, hit: 3, regen: 1 }],
+  ['goblin', 'goblinHelm', '고블린 족장 투구', 'helm', 1, { def: 2, hp: 15, dmg: 1 }],
+  ['raccoon', 'raccoonNeck', '너구리 꼬리 목걸이', 'neck', 2, { hp: 30, goldPct: 8 }],
+  ['vine', 'vineSpear', '덩굴 가시창', 'spear', 2, { stealPct: 2 }],
+  ['nightwing', 'nightDagger', '밤깃 단검', 'dagger', 2, { crit: 5, atkPct: 3 }],
+  ['crab', 'crabArmor', '게딱지 갑옷', 'armor', 3, { def: 10, hp: 20, hit: -2 }],
+  ['ember', 'emberAxe', '잿불 도끼', 'axe', 3, { crit: 4 }],
+  ['stalker', 'shadowGloves', '흑암의 장갑', 'gloves', 3, { hit: 8, dmg: 3, atkPct: 3 }],
+  ['wisp', 'wispEar', '넋의 귀걸이', 'ear', 4, { hp: 40, expPct: 6 }],
+  ['skull', 'skullBlade', '불꽃해골 대검', 'twohand', 4, { crit: 6 }],
+  ['warden', 'wardenBelt', '파수꾼의 벨트', 'belt', 4, { hp: 100, def: 2 }],
+  ['eye', 'eyeRing', '저주받은 눈 반지', 'ring', 4, { dmg: 6, crit: 3 }],
+  ['frostjelly', 'frostWrist', '서리 젤리 팔찌', 'wrist', 5, { def: 4, regen: 3 }],
+  ['icesprite', 'spriteCloak', '정령의 망토', 'cloak', 5, { def: 5, hit: 6, movePct: 5 }],
+  ['frostbeetle', 'beetleHelm', '갑각충 투구', 'helm', 5, { def: 6, hp: 50 }],
+  ['blizzsnake', 'blizzSword', '눈보라 검', 'sword', 5, { stealPct: 4, atkPct: 3 }],
+  ['boss', 'echoBoots', '큰울림의 부츠', 'boots', 3, { def: 3, regen: 3, movePct: 12 }],
+  ['lich', 'lichCloak', '기사왕의 망토', 'cloak', 4, { def: 4, dmg: 3, hpPct: 3 }],
+  ['drake', 'drakeNeck', '서리 용의 목걸이', 'neck', 5, { hp: 120, dmg: 4, expPct: 5 }],
+];
+const WEAPON_TYPE_IDS = WEAPON_TYPES.map(t => t.type);
+const ACC_SLOTS = ['neck', 'ring', 'ear', 'wrist'];
+const NAMED_PRICE = PART_PRICE; // 팔면 같은 등급 부위값(파는 돈으로 성장이 빨라지지 않게 — 시뮬레이터)
+export const NAMED_ITEMS = NAMED_ROWS.map(([from, id, name, where, tier, fx]) => {
+  const head = { id, name, named: true, from, area: tier, shop: false, sellRate: 0.25, p25: true };
+  if (WEAPON_TYPE_IDS.includes(where)) {
+    const b = weapons.find(w => w.type === where && w.tier === tier && !w.rare && !w.rank);
+    const { tier: _tier, p21: _p21, shop: _shop, price: _price, ...base } = b;
+    return { ...base, ...head, min: Math.ceil(b.min * 1.05), max: Math.ceil(b.max * 1.05), price: b.price, ...fx, ...(fx.crit ? { crit: (b.crit ?? 0) + fx.crit } : {}) };
+  }
+  return { ...head, kind: 'armor', slot: where, ...(ACC_SLOTS.includes(where) ? { acc: true } : {}), def: 0, ...fx, price: NAMED_PRICE[tier - 1] };
+});
+for (const d of NAMED_ITEMS) (d.kind === 'weapon' ? weapons : armors).push(d);
+// 몬스터 id → 이름난 장비 드랍(맨 끝에 붙임 — 한 번 굴릴 때 앞 항목 결과는 그대로, ⑤ #2). 들판 0.005·그 밖 일반 0.003·보스 0.1 [가정: 일반 200~333마리에 1개]
+const NAMED_DROP = Object.fromEntries(NAMED_ROWS.map(([from, id]) => [from, id]));
 // 일반 몬스터 드랍(지역 단계별). 4차부터 몬스터마다 드랍을 명시한다(순번으로 정하지 않음)
 // 8차: 물약 종류(지역별)·부위 장비(그 지역 등급, 부위마다 partChance)
 // 10차: pool 드랍 = 한 번 굴려 맞으면 목록 중 하나(다음 난수로 고름). 새 무기 계열(typeChance)·희귀(전체 0.002)
@@ -258,7 +317,10 @@ const monsters = rows.map(([id, name, level, hp, atk, def, exp, base, mapId, isB
   .map(({ id, name, level, hp, atk, def, exp, average, mapId, isBoss, drops }) => ({
   id, name, level, hp, atk, def, exp, mapId, isBoss,
   gold: { min: Math.ceil(average * 0.8), max: 2 * average - Math.ceil(average * 0.8) },
-  drops: drops.map(drop => (drop.pool ? { ...drop, pool: [...drop.pool] } : { ...drop })),
+  drops: [
+    ...drops.map(drop => (drop.pool ? { ...drop, pool: [...drop.pool] } : { ...drop })),
+    ...(NAMED_DROP[id] ? [{ id: NAMED_DROP[id], count: 1, chance: isBoss ? 0.1 : mapId === 'field' ? 0.005 : 0.003 }] : []), // 25차
+  ],
 }));
 
 // 12차 도감: 세트를 이루는 +0 장비를 넣으면 가방에서 사라지고, 세트를 **다 채우면** 효과(부분 효과 없음).
@@ -276,6 +338,11 @@ const CODEX = [
   { id: 'body', name: '갑옷 수집', items: BODY_ARMORS, fx: { hp: 30, def: 1 } },
   { id: 'lich', name: '기사왕의 유품', items: ['wraithSword', 'wraithArmor'], fx: { dmg: 2, def: 2, hp: 30, goldPct: 5 } },
   { id: 'drake', name: '용의 유품', items: ['drakeSword', 'drakeArmor'], fx: { dmg: 3, def: 3, hp: 40, goldPct: 5 } }, // 21차
+  // 25차 이름난 장비 도감(지역 5 + 보스 1). p25 = v16 이하 기록에는 없음 [가정]
+  ...[['named1', '들판의 이름난 장비', 'field', { hp: 20 }], ['named2', '숲의 이름난 장비', 'forest', { hit: 2 }], ['named3', '폐광의 이름난 장비', 'mine', { def: 2 }],
+    ['named4', '성터의 이름난 장비', 'ruin', { dmg: 2 }], ['named5', '서리의 이름난 장비', 'frost', { dmg: 2, hp: 30 }]].map(([id, name, mapId, fx]) => ({
+    id, name, items: NAMED_ROWS.filter(([from]) => rows.some(r => r[0] === from && r[8] === mapId && !r[9])).map(([, item]) => item), fx, p25: true })),
+  { id: 'named6', name: '보스의 이름난 장비', items: ['echoBoots', 'lichCloak', 'drakeNeck'], fx: { expPct: 3, goldPct: 3 }, p25: true },
 ];
 // 12차 칭호(하나만 씀): 일반 몬스터마다 I 100·II 500·III 2000마리, 효과는 사냥터 종류별 × 단계. 보스 1회, 도감 세트 완성 수.
 // 얻은 목록은 저장하지 않고 처치 수·도감에서 계산한다(처치 수는 줄지 않음)

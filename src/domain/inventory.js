@@ -166,11 +166,14 @@ export function sell(save, uid, count, bal) {
 // 같은 종류를 끼고 있지 않으면 그 종류는 대상 없음. 강화된 것·보스 장비(shop:false)·더 좋은 것은 절대 대상이 아니다.
 // 비교는 장비의 기본 수치 기준이다(강화로 오른 값은 보지 않음 — 틀려도 '안 파는' 쪽으로만 틀린다. 예: 강철검+6을 끼고 있으면 미스릴검+0은 남긴다).
 // 8차: 같은 칸(부위)의 낀 장비와 비교하고, 그 부위의 모든 수치(무기 최소·최대 / 방어·체력·명중·피해·재생)가 같거나 낮을 때만
-const GEAR_FIELDS = { weapon: ['min', 'max', 'dmgPct', 'crit', 'hit'], armor: ['def', 'hp', 'hit', 'dmg', 'regen'] };
+// 25차: 방어구 새 효과(치명·간격·이동·경험치·돈·체력 %)도 모두 낮거나 같아야 '안 쓰는 장비'
+const GEAR_FIELDS = { weapon: ['min', 'max', 'dmgPct', 'crit', 'hit', 'stealPct', 'atkPct'], armor: ['def', 'hp', 'hit', 'dmg', 'regen', 'crit', 'atkPct', 'movePct', 'expPct', 'goldPct', 'hpPct'] };
 export function isJunkGear(save, item, bal) {
   const def = itemDef(item?.id, bal);
   if (!isGearDef(def) || !def.shop || item.enchant !== 0 || item.count !== 1 || isLocked(item)) return false;
   if (Object.values(save.equip).includes(item.uid)) return false;
+  // 25차(⑤ #8): 저장해 둔 장비 세트(20차)에 든 장비도 팔지 않는다
+  if ((save.loadouts ?? []).some(l => l && Object.values(l.equip).includes(item.uid))) return false;
   // 12차(⑤ #18): 비어 있는 도감 칸을 채울 장비(칸마다 하나)는 팔지 않는다
   if (codexReserved(save, bal).has(item.uid)) return false;
   const worn = save.bag.find(other => other.uid === save.equip[slotOf(def)]);
@@ -178,6 +181,8 @@ export function isJunkGear(save, item, bal) {
   if (!wd || slotOf(wd) !== slotOf(def)) return false;
   // 10차: 무기는 같은 계열끼리만 비교, 공격 간격(speedPct)은 같거나 느릴 때만(+가 느림)
   if (def.kind === 'weapon' && ((def.type ?? 'sword') !== (wd.type ?? 'sword') || (def.speedPct ?? 0) < (wd.speedPct ?? 0))) return false;
+  // 25차: 큰 갑옷은 같은 계열(중갑·경갑·로브)끼리만 비교
+  if (def.slot === 'armor' && (def.line ?? 'heavy') !== (wd.line ?? 'heavy')) return false;
   // 10차(⑤ #15): 부위 장비는 같은 등급 부위를 다른 칸에 하나라도 끼고 있으면 세트 후보라 팔지 않는다
   const partTier = d => (d?.kind === 'armor' && d.slot && d.slot !== 'armor' && !d.acc ? d.tier : null); // 18차: 장신구는 세트 후보 아님
   if (partTier(def) && EQUIP_SLOTS.some(sl => sl !== slotOf(def) && partTier(itemDef(save.bag.find(o => o.uid === save.equip[sl])?.id, bal)) === def.tier)) return false;

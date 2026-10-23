@@ -375,6 +375,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .cell.legend, .row-item.legend, .slot.legend { box-shadow: inset 0 0 0 2px #ff9a3c, 0 0 9px #ff9a3ccc; }
 .hero-t { color: #d6a8ff; text-shadow: 0 0 4px #7a3cc8; }
 .legend-t { color: #ffb45e; text-shadow: 0 0 5px #c0600a; }
+/* 25차 이름난 장비(청록) — 몬스터마다 하나 */
+.cell.named, .row-item.named, .slot.named { box-shadow: inset 0 0 0 2px #3fd1ad, 0 0 7px #3fd1ad99; }
+.named-t { color: #6fe3c6; text-shadow: 0 0 4px #127a64; }
 /* 23차 장신구 4칸: 인형 아래 작은 칸 한 줄 */
 .doll .accrow { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .doll .accrow .slot { width: auto; height: 52px; }

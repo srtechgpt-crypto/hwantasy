@@ -29,7 +29,8 @@ import { elixirExtra, validElixir, validRecover, validDolls } from './growth.js'
 //      14 → 15는 v14 규칙(최대 40·서리 없음·p21 없음·보스 2)으로 검사한 뒤 bosses.drake = null만 더한다(경험치 공식 같음)
 // 16 = 2026-10-22 23차: 장신구 2칸(equip.ear·wrist, 장비 세트도 13칸)·23차 아이템(p23: 귀걸이·팔찌·영웅/전설)·선물 save.gifts(선택 필드).
 //      15 → 16은 v15 규칙(11칸·p23 없음·선물 없음)으로 검사한 뒤 두 칸(null)만 더한다
-export const SAVE_VERSION = 16;
+// 17 = 2026-10-23 25차: 25차 아이템(p25: 경갑·로브·이름난 장비)·이름난 장비 도감 세트(p25). 16 → 17은 v16 규칙(p25 없음)으로 검사 후 버전만
+export const SAVE_VERSION = 17;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
@@ -154,7 +155,18 @@ export const no23 = b => {
     gifts: [],
   };
 };
-export const balFor = (bal, version) => (version === 16 ? bal : version === 15 ? no23(bal) : no23(no21(balFor14(bal, version))));
+// 25차: v16 이하 규칙 = 25차 아이템(p25)·그 아이템이 든 드랍 항목·25차 도감 세트 없음(no25는 여러 번 써도 같음)
+export const no25 = b => {
+  const gone = new Set([...b.weapons, ...b.armors, ...b.consumables].filter(def => def.p25).map(def => def.id));
+  if (!gone.size && !(b.codex ?? []).some(c => c.p25)) return b;
+  const items = list => list.filter(def => !def.p25);
+  return {
+    ...b, weapons: items(b.weapons), armors: items(b.armors), consumables: items(b.consumables),
+    monsters: b.monsters.map(m => ({ ...m, drops: m.drops.filter(d => !(d.pool ?? [d.id]).some(id => gone.has(id))) })),
+    codex: b.codex?.filter(c => !c.p25 && c.items.every(id => !gone.has(id))),
+  };
+};
+export const balFor = (bal, version) => (version === 17 ? bal : version === 16 ? no25(bal) : version === 15 ? no25(no23(bal)) : no25(no23(no21(balFor14(bal, version)))));
 const balFor12 = (bal, version) => (version === 12 ? bal
   : version === 11 ? v11Bal(bal)
   : version === 10 ? v10Bal(bal)
@@ -229,6 +241,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
   // 21차 ⑤ #5: 옛 버전을 지금 밸런스로 넘겨도 21차 것(최대 50·서리·p21)은 받지 않게(no21은 여러 번 써도 같음)
   if (version < 15 && isRecord(bal?.progression) && Array.isArray(bal.monsters)) bal = no21(bal); // ⑦ #1: 최대 레벨과 상관없이 늘 적용
   if (version < 16 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no23(bal); // 23차: 같은 방식
+  if (version < 17 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no25(bal); // 25차 ⑤ #3: 새 도감 세트도 함께
   const errors = [];
   const bad = message => errors.push(message);
   if (!isRecord(save)) return { ok: false, errors: ['저장은 객체여야 합니다'] };
@@ -271,6 +284,7 @@ export function validate(save, bal, version = SAVE_VERSION) {
       if (def.p19 && version < 13) bad('옛 버전 기록에 보스 코인이 있습니다'); // 19차
       if (def.p21 && version < 15) bad('옛 버전 기록에 21차 아이템이 있습니다'); // 21차 ⑤ #5
       if (def.p23 && version < 16) bad('옛 버전 기록에 23차 아이템이 있습니다'); // 23차
+      if (def.p25 && version < 17) bad('옛 버전 기록에 25차 아이템이 있습니다'); // 25차
       if (!integer(item.count, 1, gear ? 1 : bal.inventory.stackMax)) bad('아이템 수량이 올바르지 않습니다');
       if (gear ? !integer(item.enchant, 0, enchantRule(def, bal).max) : item.enchant !== undefined) bad('아이템 강화 단계가 올바르지 않습니다');
       // 13차: 잠금은 v9 장비에만, 값은 true만(없으면 안 잠김)
@@ -461,6 +475,14 @@ function v8to9(save, bal) {
   next.version = 9;
   return next;
 }
+// 16→17(25차): v16 규칙(p25 없음)으로 검사한 뒤 버전만(형식 같음)
+function v16to17(save, bal) {
+  const check = validate(save, balFor(bal, 16), 16);
+  if (!check.ok) throw new TypeError(`버전 16 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 17;
+  return next;
+}
 // 15→16(23차): v15 규칙(11칸·p23 없음)으로 검사한 뒤 귀걸이·팔찌 칸(null)을 장착·장비 세트에 더한다
 function v15to16(save, bal) {
   const check = validate(save, balFor(bal, 15), 15);
@@ -523,9 +545,14 @@ function v9to10(save, bal) {
   next.version = 10;
   return next;
 }
+// 25차: 모든 경로가 마지막에 v16→17을 지난다(v16까지는 23차 경로 그대로)
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   if (save.version === SAVE_VERSION) return clone(save);
+  if (save.version === 16) return v16to17(save, bal);
+  return v16to17(migrateTo16(save, bal), bal);
+}
+function migrateTo16(save, bal) {
   if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');
   // 21차 ⑤ #3: 모든 경로가 마지막에 v14→15를 지난다. 23차: 그 뒤 v15→16
   if (save.version === 15) return v15to16(save, bal);

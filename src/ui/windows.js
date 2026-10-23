@@ -1,6 +1,6 @@
 // 창: 가방·상점(잡화상/대장장이)·창고·강화·순간이동. 열려 있으면 게임이 멈춘다(멈춤 사유 'window').
 // 모든 거래는 domain 함수로 새 save 후보를 만들고 G.commit으로 "저장에 성공했을 때만" 확정한다.
-import bal, { WEAPON_TYPES } from '../../data/balance.js';
+import bal, { WEAPON_TYPES, ARMOR_LINES } from '../../data/balance.js';
 import * as inv from '../domain/inventory.js';
 import { enchantInfo, tryEnchant, enchantPlan, enchantTo, blessedPlan, tryBlessed, lowerEnchant, blessedScrollOf, sameGearCandidates, enchantManyPlan, enchantMany } from '../domain/enchant.js';
 import { morphDef, unmorph, rollText } from '../domain/morph.js';
@@ -37,13 +37,20 @@ const itemName = (it) => `${it.enchant ? `+${it.enchant} ` : ''}${itemDef(it.id,
 // 10차: 희귀 장비(금빛 테두리·이름), 무기 계열 이름
 const isRare = (id) => !!itemDef(id, bal)?.rare;
 // 23차: 영웅(보라)·전설(주황)은 rank로 — 희귀와 같은 자리에 색만 다르게
-const rankOf = (id) => itemDef(id, bal)?.rank ?? null;
-const RANK_NAME = { hero: '영웅', legend: '전설' };
+// 25차: 이름난 장비(청록)도 같은 자리 — 색 이름은 rank처럼 'named'
+const rankOf = (id) => { const d = itemDef(id, bal); return d?.rank ?? (d?.named ? 'named' : null); };
+const RANK_NAME = { hero: '영웅', legend: '전설', named: '이름난' };
 const rareCls = (id) => (rankOf(id) ?? (isRare(id) ? 'rare' : ''));
 const nameHtml = (it) => (rankOf(it.id) ? `<span class="${rankOf(it.id)}-t">${esc(itemName(it))}</span>` : isRare(it.id) ? `<span class="rare-t">${esc(itemName(it))}</span>` : esc(itemName(it)));
-const gradeTag = (d) => (d.rank ? `<b class="${d.rank}-t">${RANK_NAME[d.rank]}</b> · ` : d.rare ? '<b class="rare-t">희귀</b> · ' : '');
+const gradeTag = (d) => (d.rank ? `<b class="${d.rank}-t">${RANK_NAME[d.rank]}</b> · ` : d.named ? '<b class="named-t">이름난</b> · ' : d.rare ? '<b class="rare-t">희귀</b> · ' : '');
+// 25차 큰 갑옷 계열 이름(중갑·경갑·로브)
+const LINE_OF = Object.fromEntries(ARMOR_LINES.map((l) => [l.line, l]));
+const lineOf = (d) => (d.kind === 'armor' && d.slot === 'armor' ? LINE_OF[d.line ?? 'heavy'] : null);
 // 23차 영웅·전설 특수 효과 한 줄(대검·도끼의 치명은 기존 '치명 +%'에 합쳐 보임)
-const rankFx = (d) => [d.stealPct ? `흡혈 ${d.stealPct}%(때린 피해만큼 체력 회복)` : '', d.atkPct ? `공격 간격 −${d.atkPct}%` : '', d.hpPct ? `최대 체력 +${d.hpPct}%` : ''].filter(Boolean);
+// 25차: 방어구 치명·이동·경험치·돈 %도(무기 치명은 계열 줄에 이미 있음)
+const rankFx = (d) => [d.stealPct ? `흡혈 ${d.stealPct}%(때린 피해만큼 체력 회복)` : '', d.atkPct ? `공격 간격 −${d.atkPct}%` : '', d.hpPct ? `최대 체력 +${d.hpPct}%` : '',
+  d.kind === 'armor' && d.crit ? `치명 +${d.crit}%` : '', d.movePct ? `이동 속도 +${d.movePct}%` : '', d.expPct ? `경험치 +${d.expPct}%` : '', d.goldPct ? `돈 +${d.goldPct}%` : ''].filter(Boolean);
+const NOT_SCORED = (d) => [d.stealPct ? '흡혈' : '', d.movePct ? '이동 속도' : '', d.expPct ? '경험치 %' : '', d.goldPct ? '돈 %' : ''].filter(Boolean);
 const TYPE_OF = Object.fromEntries(WEAPON_TYPES.map((t) => [t.type, t]));
 const equipped = (s, uid) => Object.values(s.equip).includes(uid);
 // 6차: 지금 낀 같은 종류 장비보다 좋으면 초록 ▲, 나쁘면 빨강 ▼(같거나 장비가 아니면 없음)
@@ -64,8 +71,17 @@ const cmpMark = (s, id, enchant = 0) => {
 
 const SHOP_GOODS = {
   shop: bal.consumables.filter((c) => c.shop).map((c) => c.id),
-  smith: [...bal.weapons, ...bal.armors].filter((g) => g.shop).map((g) => g.id),
+  smith: smithGoods(),
 };
+// 25차(⑤ #13): 큰 갑옷은 등급 → 계열(중갑·경갑·로브) 순으로 첫 큰 갑옷 자리에 모아 둔다(경갑·로브가 목록 끝에 따로 붙지 않게)
+function smithGoods() {
+  const gear = [...bal.weapons, ...bal.armors].filter((g) => g.shop);
+  const isBody = (d) => d.kind === 'armor' && d.slot === 'armor';
+  const lineIx = (d) => ARMOR_LINES.findIndex((l) => l.line === (d.line ?? 'heavy'));
+  const body = gear.filter(isBody).sort((x, y) => (x.tier ?? 0) - (y.tier ?? 0) || lineIx(x) - lineIx(y));
+  const at = gear.findIndex(isBody), rest = gear.filter((d) => !isBody(d));
+  return [...rest.slice(0, at), ...body, ...rest.slice(at)].map((g) => g.id);
+}
 const TITLES = {
   bag: ['가방', 'weaponScroll'], shop: ['잡화상 노인', 'potion'], smith: ['대장장이', 'ironSword'],
   bank: ['창고지기', 'armorScroll'], tele: ['순간이동 마법사', 'returnScroll'], rates: ['배율', 'rates'], map: ['지도', 'map'],
@@ -318,12 +334,12 @@ export function initWindows() {
       const parts = [];
       if (d.def || it.enchant) parts.push(`방어 ${d.def}${it.enchant ? ` (+${it.enchant})` : ''}`);
       if (d.hp) parts.push(`최대 체력 +${d.hp}`);
-      if (d.hit) parts.push(`명중 +${d.hit}%`);
+      if (d.hit) parts.push(`명중 ${d.hit > 0 ? '+' : ''}${d.hit}%`);
       if (d.dmg) parts.push(`피해 +${d.dmg}`);
       if (d.regen) parts.push(`회복 +${d.regen}`);
       parts.push(...rankFx(d));
       const setName = d.slot && d.slot !== 'armor' && !d.acc && d.tier ? bal.sets?.find((x) => x.tier === d.tier)?.name : null;
-      return `${gradeTag(d)}${SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}${setName ? ` · <small>${setName} 세트</small>` : ''}`;
+      return `${gradeTag(d)}${lineOf(d) && d.line ? lineOf(d).noun : SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}${setName ? ` · <small>${setName} 세트</small>` : ''}`;
     }
     if (d.elixir) return `${STAT_NAME[d.elixir]} 영구 +1 (최대 ${bal.elixirMax}개, 지금 ${(elixirOf(G.save) ?? {})[d.elixir] ?? 0}개)`;
     if (d.dollBox) return `열면 마법인형 ${bal.dolls.length}종 중 하나(이미 있으면 ${won(bal.dollRefund)}원을 돌려받음)`;
@@ -428,9 +444,15 @@ export function initWindows() {
       rows.push(['기간', '<b>끼고 있는 동안 계속</b>(영구) — 벗으면 효과가 빠집니다']);
       if (d.kind === 'weapon') {
         const t = TYPE_OF[d.type ?? 'sword'];
-        rows.push(['종류', `${t?.noun ?? '검'} — ${t?.desc ?? ''}${d.rare ? ' · <b class="rare-t">희귀</b>(같은 등급보다 공격 ×1.25)' : ''}${d.rank ? ` · <b class="${d.rank}-t">${RANK_NAME[d.rank]}</b>(보스 전용, 공격 ×${d.rank === 'legend' ? 1.6 : 1.35})` : ''}`]);
+        rows.push(['종류', `${t?.noun ?? '검'} — ${t?.desc ?? ''}${d.rare ? ' · <b class="rare-t">희귀</b>(같은 등급보다 공격 ×1.25)' : ''}${d.rank ? ` · <b class="${d.rank}-t">${RANK_NAME[d.rank]}</b>(보스 전용, 공격 ×${d.rank === 'legend' ? 1.6 : 1.35})` : ''}${d.named ? ' · <b class="named-t">이름난</b>(같은 등급보다 공격 ×1.05)' : ''}`]);
       }
-      if (d.rank) rows.push(['특수 효과', `<b class="${d.rank}-t">${rankFx(d).concat(d.kind === 'weapon' && d.crit && ['twohand', 'axe'].includes(d.type) ? [`치명 +${d.crit}%`] : []).join(' · ')}</b>${d.stealPct ? ' — 비교 ▲▼ 점수에는 흡혈이 들어가지 않습니다' : ''}`]);
+      if (lineOf(d)) rows.push(['계열', `<b>${lineOf(d).noun}</b> — ${lineOf(d).desc}`]);
+      if (d.named) {
+        const mon = bal.monsters.find((m) => m.id === d.from);
+        rows.push(['이름난 장비', `<b class="named-t">${esc(mon?.name ?? '')}</b>${mon?.isBoss ? '(보스)' : ''}만 떨어뜨림 · 상점 없음${(() => { const set = bal.codex.find((c) => c.items.includes(d.id)); return set ? ` · 도감 「${esc(set.name)}」(${set.items.map((x) => esc(itemDef(x, bal).name)).join('·')})` : ''; })()}`]); // ⑦ #1: 실제 세트 이름
+      }
+      const fx = rankFx(d).concat(d.kind === 'weapon' && d.crit && (d.named || ['twohand', 'axe'].includes(d.type)) ? [`치명 +${d.crit}%`] : []);
+      if ((d.rank || d.named) && fx.length) rows.push(['특수 효과', `<b class="${d.rank ?? 'named'}-t">${fx.join(' · ')}</b>${NOT_SCORED(d).length ? ` — 비교 ▲▼ 점수에는 ${josa(NOT_SCORED(d).join('·'), '이/가')} 들어가지 않습니다` : ''}`]);
       const label = wearing ? '지금 끼고 있음' : s.bag.some((i) => i.uid === s.equip[slot]) ? '바꿔 끼면' : '끼면';
       const from = wearing ? base : cur;
       rows.push([label, `${wearing ? '(이 장비를 빼면 → 끼고 있는 지금) ' : ''}공격 ${atkText(from)} → <b>${atkText(next)}</b> · 간격 ${arrowLow(from.attackMs, next.attackMs)} · 치명 ${arrow(from.critPct, next.critPct, '%')}${from.dmgPct !== next.dmgPct ? ` · 피해 % ${arrow(from.dmgPct, next.dmgPct, '%')}` : ''}`]);
@@ -765,7 +787,7 @@ export function initWindows() {
     if (!cur.buyId || !goods.includes(cur.buyId)) cur.buyId = goods[0];
     const rows = goods.map((id) => {
       const d = itemDef(id, bal);
-      return `<button type="button" class="row-item ${cur.buyId === id ? 'on' : ''}" data-act="pick" data-id="${id}">${icon(id)}<span>${d.name}${cmpMark(s, id)}</span><em>${won(d.price)}원</em></button>`;
+      return `<button type="button" class="row-item ${cur.buyId === id ? 'on' : ''}" data-act="pick" data-id="${id}">${icon(id)}<span>${d.name}${lineOf(d) ? `<small class="typechip">${lineOf(d).noun}</small>` : ''}${cmpMark(s, id)}</span><em>${won(d.price)}원</em></button>`;
     }).join('');
     const d = itemDef(cur.buyId, bal), max = inv.maxBuy(s, cur.buyId, bal);
     const stack = d.kind === 'consumable';
@@ -861,6 +883,7 @@ export function initWindows() {
         <p>치명 ${arrow(now.critPct, prev.critPct, '%')}${now.dmgPct ? ` · 무기 피해 ${now.dmgPct > 0 ? '+' : ''}${now.dmgPct}%` : ''}</p>
         <p>방어 ${arrow(now.def, prev.def)}</p><p>최대 체력 ${arrow(now.maxHp, prev.maxHp)}</p>
         <p>회복 ${arrow(now.regenPerTick, prev.regenPerTick)} <small>/${now.regenMs / 1000}초</small></p>
+        ${gearExtras(s, now)}
         ${spent ? (cur.confirmReset
           ? `<div class="warnbox"><p><b class="gold-t">${won(cost)}원</b>을 내고 보너스 점수 ${spent}점을 모두 되돌립니다.</p>
              <div class="btns"><button type="button" class="act danger" data-act="resetok" ${cur.busy ? 'disabled' : ''}>다시 나누기</button><button type="button" class="act" data-act="resetno">그만두기</button></div></div>`
@@ -886,10 +909,16 @@ export function initWindows() {
   // ---------- 12차 도감 ----------
   // 세트마다 칸 그림(넣음=밝게+✓, 가방에 넣을 수 있는 +0 장비가 있음=노란 테두리, 없음=흐리게), n/m, 효과, [넣기 N]
   // [넣기]는 확인 상자(쓰일 장비 이름 목록)를 먼저 — 확인한 uid 그대로만 등록된다(⑤ #15·#17)
+  // 25차: 이동 속도(장비·변신)·장비 경험치/돈 % 한 줄(없으면 빈칸)
+  function gearExtras(s, now) {
+    const g = col.permOf({ ...s, codex: null, title: null, dolls: null }, bal);
+    const parts = [now.movePct ? `이동 속도 +${now.movePct}%` : '', g.expPct ? `장비 경험치 +${g.expPct}%` : '', g.goldPct ? `장비 돈 +${g.goldPct}%` : ''].filter(Boolean);
+    return parts.length ? `<p class="named-t">${parts.join(' · ')}</p>` : '';
+  }
   const CODEX_GROUPS = [['무기 모음', (id) => id.startsWith('wpn')], ['머리·몸 (투구·티셔츠·망토·장갑)', (id) => id.startsWith('top')],
-    ['허리·다리 (벨트·바지·부츠)', (id) => id.startsWith('low')], ['빛나는 장비', (id) => id.startsWith('rare')], ['특별', (id) => ['body', 'lich', 'drake'].includes(id)]]; // 21차 ⑤ #12
+    ['허리·다리 (벨트·바지·부츠)', (id) => id.startsWith('low')], ['빛나는 장비', (id) => id.startsWith('rare')], ['특별', (id) => ['body', 'lich', 'drake'].includes(id)], ['이름난 장비 (몬스터마다 하나)', (id) => id.startsWith('named')]]; // 21차 ⑤ #12, 25차
   function viewCodex(s) {
-    const done = col.doneSets(s.codex, bal).length, total = bal.codex.length, p = col.permOf({ ...s, title: null }, bal);
+    const done = col.doneSets(s.codex, bal).length, total = bal.codex.length, p = col.permOf({ ...s, title: null, equip: {} }, bal); // 25차: 낀 장비의 경험치·돈 %는 빼고
     const sum = col.fxText(p) || '아직 없음';
     const head = `<div class="cxsum"><b>도감 ${done}/${total}</b><span>완성 효과 합계: ${sum}</span></div>
       <p class="sub-t">같은 세트 장비를 모두 넣으면 효과가 영원히 붙습니다. 넣은 장비는 가방에서 사라집니다(<b>+0이고 끼지 않은 것만</b> 씁니다 — 강화한 장비·낀 장비·창고 물건은 쓰지 않음).</p>`;
