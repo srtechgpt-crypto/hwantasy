@@ -79,4 +79,5 @@ export function tickMorph(morph, dtMs) {
   return { morph: { ...morph, cur: null }, ended: true };
 }
 export const ROLL_NAMES = { str: '힘', dex: '민첩', crit: '치명', hit: '명중' };
-export const rollText = r => `${ROLL_NAMES[r.k]} +${r.v}${r.k === 'crit' || r.k === 'hit' ? '%' : ''}`;
+// 27차: bal을 주면 직업 능력치 이름(마법사 str = 지능)
+export const rollText = (r, bal) => `${(r.k === 'str' && bal?.statNames?.str) || ROLL_NAMES[r.k]} +${r.v}${r.k === 'crit' || r.k === 'hit' ? '%' : ''}`;

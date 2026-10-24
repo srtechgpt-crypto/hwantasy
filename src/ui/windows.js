@@ -2,7 +2,7 @@
 // 모든 거래는 domain 함수로 새 save 후보를 만들고 G.commit으로 "저장에 성공했을 때만" 확정한다.
 import { WEAPON_TYPES, ARMOR_LINES } from '../../data/balance.js';
 import { bal } from '../cbal.js'; // 26차: 지금 캐릭터 직업으로 본 밸런스(스킬 이름·숫자·카드 이름)
-import { canWield, clsOf, className } from '../domain/classes.js';
+import { canWield, clsOf, className, statName } from '../domain/classes.js';
 import * as chars from '../domain/chars.js';
 import * as inv from '../domain/inventory.js';
 import { enchantInfo, tryEnchant, enchantPlan, enchantTo, blessedPlan, tryBlessed, lowerEnchant, blessedScrollOf, sameGearCandidates, enchantManyPlan, enchantMany } from '../domain/enchant.js';
@@ -346,7 +346,7 @@ export function initWindows() {
       const setName = d.slot && d.slot !== 'armor' && !d.acc && d.tier ? bal.sets?.find((x) => x.tier === d.tier)?.name : null;
       return `${gradeTag(d)}${lineOf(d) && d.line ? lineOf(d).noun : SLOT_NAMES[slotOf(d)]} · ${parts.join(' · ')}${setName ? ` · <small>${setName} 세트</small>` : ''}`;
     }
-    if (d.elixir) return `${STAT_NAME[d.elixir]} 영구 +1 (최대 ${bal.elixirMax}개, 지금 ${(elixirOf(G.save) ?? {})[d.elixir] ?? 0}개)`;
+    if (d.elixir) return `${statName(d.elixir, bal)} 영구 +1 (최대 ${bal.elixirMax}개, 지금 ${(elixirOf(G.save) ?? {})[d.elixir] ?? 0}개)`;
     if (d.dollBox) return `열면 마법인형 ${bal.dolls.length}종 중 하나(이미 있으면 ${won(bal.dollRefund)}원을 돌려받음)`;
     if (d.card) return `<b class="grade g-${d.grade}">${bal.gradeNames[d.grade]}</b> 스킬 카드 — [정보]→[스킬]에서 ${esc(bal.skills.find((k) => k.id === d.card)?.name ?? '')} 레벨을 올리거나, ${bal.cardFuse}장을 합성해 다음 등급 카드로 바꿉니다`;
     if (d.heal) return `체력 +${d.heal}`;
@@ -855,20 +855,19 @@ export function initWindows() {
   }
 
   // 능력치: 힘·민첩·체력 + 보너스 점수 나누기(확정 전 미리 보기) + 마을에서 다시 나누기
-  const STAT_NAME = { str: '힘', dex: '민첩', con: '체력' };
   const STAT_ROWS = [
-    ['str', '힘', '피해가 올라 빨리 잡습니다 (추천)'],
+    ['str', '힘', '피해가 올라 빨리 잡습니다 (추천)'], // 27차: 이름은 statName(마법사 = 지능)
     ['dex', '민첩', '명중과 공격 속도가 오릅니다'],
     ['con', '체력', '최대 체력·회복·방어가 올라 오래 버팁니다(사냥은 느려짐)'],
   ];
   function viewStats(s) {
-    const clsLine = `<p class="hint">${esc(s.hero?.name ?? '')} · <b>${className(clsOf(s), bal)}</b>${clsOf(s) === 'elf' ? ' — 활을 들면 피해 보너스가 힘 대신 <b>민첩</b>으로 오릅니다' : ''}</p>`;
+    const clsLine = `<p class="hint">${esc(s.hero?.name ?? '')} · <b>${className(clsOf(s), bal)}</b>${clsOf(s) === 'elf' ? ' — 활을 들면 피해 보너스가 힘 대신 <b>민첩</b>으로 오릅니다' : clsOf(s) === 'wizard' ? ' — 지팡이 마법은 <b>몬스터 방어를 절반 무시</b>하고, 피해 보너스는 <b>지능</b>으로 오릅니다' : ''}</p>`;
     const draft = cur.draft ?? { str: 0, dex: 0, con: 0 };
     const used = draft.str + draft.dex + draft.con, left = inv.unspentPoints(s, bal) - used;
     const now = loadoutStats(s, bal);
     const prev = loadoutStats({ ...s, player: { ...s.player, bonus: { str: s.player.bonus.str + draft.str, dex: s.player.bonus.dex + draft.dex, con: s.player.bonus.con + draft.con } } }, bal);
     const arrow = (a, b, unit = '') => (a === b ? `<b>${a}${unit}</b>` : `<b>${a}${unit}</b> → <b class="gold-t">${b}${unit}</b>`);
-    const rows = STAT_ROWS.map(([k, name, desc]) => `<div class="statrow"><span class="sname">${name}</span>${arrow(now[k], prev[k])}
+    const rows = STAT_ROWS.map(([k, , desc]) => [k, statName(k, bal), desc]).map(([k, name, desc]) => `<div class="statrow"><span class="sname">${name}</span>${arrow(now[k], prev[k])}
       <small>보너스 ${s.player.bonus[k]}${draft[k] ? ` +${draft[k]}` : ''}</small>
       <button type="button" class="rbtn" data-act="bonus" data-k="${k}" ${left > 0 && !cur.busy ? '' : 'disabled'} aria-label="${name} 올리기">+</button>
       <span class="sdesc">${desc}</span></div>`).join('');
@@ -882,8 +881,8 @@ export function initWindows() {
         ${used ? `<div class="btns"><button type="button" class="act primary" data-act="bonusok" ${cur.busy ? 'disabled' : ''}>확정</button><button type="button" class="act" data-act="bonusundo">되돌리기</button></div>
           <p class="hint">확정하면 바꿀 수 없습니다(마을에서 돈을 내고 다시 나눌 수 있음).</p>` : ''}
         ${rows}
-        <p class="sub-t fine-t">레벨이 오르면 힘·민첩·체력이 저절로 오르고, ${bal.stats.pointEvery}레벨마다 보너스 점수 1점(능력치 +${pv})을 받습니다.</p>
-        <p class="elixrow">엘릭서 ${['str', 'dex', 'con'].map((k) => `${STAT_NAME[k]} <b>${(elixirOf(s) ?? {})[k] ?? 0}/${bal.elixirMax}</b>`).join(' · ')} <small>(보스·성터에서 드물게, 가방에서 [마시기])</small></p>
+        <p class="sub-t fine-t">레벨이 오르면 ${statName('str', bal)}·민첩·체력이 저절로 오르고, ${bal.stats.pointEvery}레벨마다 보너스 점수 1점(능력치 +${pv})을 받습니다.</p>
+        <p class="elixrow">엘릭서 ${['str', 'dex', 'con'].map((k) => `${statName(k, bal)} <b>${(elixirOf(s) ?? {})[k] ?? 0}/${bal.elixirMax}</b>`).join(' · ')} <small>(보스·성터에서 드물게, 가방에서 [마시기])</small></p>
       </div>
       <div class="derived"><h4>지금 능력${Object.keys(s.buffs ?? {}).length ? ' <small>(버프 포함)</small>' : ''}</h4>
         <p>공격 ${arrow(atkRange(now), atkRange(prev))}</p><p>명중 보너스 ${arrow(now.hitBonus, prev.hitBonus, '%')}</p>
@@ -1211,7 +1210,7 @@ export function initWindows() {
   // 11차 변신 목록: 레벨 잠금, 지금 변신·남은 시간·덤 능력치, [변신](주문서 1장) / [변신 풀기]
   function viewMorph(s) {
     const have = inv.countItem(s, 'morphScroll'), c = s.morph?.cur, lv = s.player.level;
-    const now = c ? `<div class="setbox"><b>지금 ${esc(morphDef(c.id, bal).name)}</b> — 남은 ${Math.ceil(c.ms / 60000)}분 · 덤 ${rollText(c.roll)}
+    const now = c ? `<div class="setbox"><b>지금 ${esc(morphDef(c.id, bal).name)}</b> — 남은 ${Math.ceil(c.ms / 60000)}분 · 덤 ${rollText(c.roll, bal)}
       <button type="button" class="act" data-act="unmorph" ${cur.busy ? 'disabled' : ''}>변신 풀기</button></div>` : '<p class="hint">변신하지 않은 상태입니다.</p>';
     const rows = (bal.morphs ?? []).map((m) => {
       const open = lv >= m.level;
@@ -1220,7 +1219,7 @@ export function initWindows() {
         <button type="button" class="act primary" data-act="morphGo" data-id="${m.id}" ${open && have > 0 && !cur.busy ? '' : 'disabled'}>${open ? '변신' : `Lv ${m.level}`}</button></div>`;
     }).join('');
     const r = bal.morphRolls;
-    return `<p class="sub-t">변신 주문서 ${won(have)}장 · 한 번 변신하면 20분(사냥하는 게임 시간) · 덤으로 힘 +${r.str.join('~')} / 민첩 +${r.dex.join('~')} / 치명 +${r.crit.join('~')}% / 명중 +${r.hit.join('~')}% 중 하나가 무작위로 붙습니다.
+    return `<p class="sub-t">변신 주문서 ${won(have)}장 · 한 번 변신하면 20분(사냥하는 게임 시간) · 덤으로 ${statName('str', bal)} +${r.str.join('~')} / 민첩 +${r.dex.join('~')} / 치명 +${r.crit.join('~')}% / 명중 +${r.hit.join('~')}% 중 하나가 무작위로 붙습니다.
       변신 주문서를 단축 칸에 두면 자동 사냥 중 시간이 끝났을 때 같은 변신으로 다시 변신합니다(직접 풀면 안 함).</p>${now}<div class="list morphlist">${rows}</div>
       ${have < 1 ? '<p class="hint">변신 주문서가 없습니다. 잡화상에서 살 수 있습니다.</p>' : ''}`;
   }
@@ -1432,7 +1431,7 @@ export function initWindows() {
       case 'elixir': {
         if (cur.busy) return;
         const def = itemDef(d.id, bal);
-        deal(inv.drinkElixir(s, d.id, bal), 'elixir', { okText: `${def.name}을 마셨습니다 — ${STAT_NAME[def.elixir]} 영구 +1`, after: () => { G.scene?.refreshHud(true); hud.log(`<b style="color:#e0a63e">${def.name}</b> · ${STAT_NAME[def.elixir]} 영구 +1`); } });
+        deal(inv.drinkElixir(s, d.id, bal), 'elixir', { okText: `${def.name}을 마셨습니다 — ${statName(def.elixir, bal)} 영구 +1`, after: () => { G.scene?.refreshHud(true); hud.log(`<b style="color:#e0a63e">${def.name}</b> · ${statName(def.elixir, bal)} 영구 +1`); } });
         return;
       }
       case 'dollbox': {

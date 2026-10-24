@@ -3,9 +3,9 @@
 // 기사는 bal 그대로(같은 객체) — 기사 계산·난수·예상 시간 표가 25차와 완전히 같다.
 // 스킬 id는 직업이 달라도 같다(bash·block…): 단축 칸·스킬 레벨·카드·자동 사냥·실행부가 id로 그대로 동작한다.
 import { isRecord } from './common.js';
-import { SWORD_TO_BOW, BOW } from '../../data/balance.js';
+import { SWORD_TO_BOW, BOW, SWORD_TO_STAFF, STAFF } from '../../data/balance.js';
 
-export const CLASS_IDS = ['knight', 'elf'];
+export const CLASS_IDS = ['knight', 'elf', 'wizard']; // 27차 마법사(v19부터 — save.validHero가 버전으로 거름)
 export const DEFAULT_CLASS = 'knight';
 export const isClassId = cls => CLASS_IDS.includes(cls);
 export const clsOf = save => (isRecord(save?.hero) && isClassId(save.hero.cls) ? save.hero.cls : DEFAULT_CLASS);
@@ -27,9 +27,12 @@ function makeView(base, cls) {
   const names = Object.fromEntries(skills.map(s => [s.id, s.name]));
   const kname = Object.fromEntries(base.skills.map(s => [s.id, s.name]));
   // 스킬 카드(직업 공용 아이템)는 지금 직업 스킬 이름으로 보여 준다
-  const consumables = base.consumables.map(d => (d.card ? { ...d, name: `${names[d.card]} 카드`, alias: `${base.classes.knight?.name ?? '기사'}: ${kname[d.card]}` } : d));
+  const consumables = base.consumables.map(d => (d.card ? { ...d, name: `${names[d.card]} 카드`, alias: `${base.classes.knight?.name ?? '기사'}: ${kname[d.card]}` }
+    : d.elixir && c.statNames?.[d.elixir] ? { ...d, name: `${c.statNames[d.elixir]}의 엘릭서` } : d)); // 27차: 마법사는 '지능의 엘릭서'(같은 아이템)
   // 요정은 검 드랍이 같은 등급 활로 바뀐다(드랍 항목 수·확률은 그대로 — 굴리는 난수 수가 같다)
-  const swap = cls === 'elf' ? id => SWORD_TO_BOW[id] ?? id : id => id;
+  // 27차: 마법사는 검 드랍이 같은 등급 지팡이로
+  const table = cls === 'elf' ? SWORD_TO_BOW : cls === 'wizard' ? SWORD_TO_STAFF : null;
+  const swap = table ? id => table[id] ?? id : id => id;
   const monsters = base.monsters.map(m => ({ ...m, drops: m.drops.map(d => (d.pool ? { ...d, pool: d.pool.map(swap) } : { ...d, id: swap(d.id) })) }));
   return {
     ...base, classBase: base, cls,
@@ -37,6 +40,7 @@ function makeView(base, cls) {
     knight: { ...base.knight, ...(c.base ?? {}) },
     stats: { ...base.stats, ...(c.stats ?? {}) },
     start: { ...base.start, ...(c.start ?? {}) },
+    statNames: c.statNames ?? null,
   };
 }
 
@@ -47,5 +51,9 @@ export function canWield(def, cls, bal) {
   return !no.includes(def.type ?? 'sword');
 }
 export const className = (cls, bal) => (bal?.classBase ?? bal)?.classes?.[cls]?.name ?? cls;
-// 활 사거리(px). 활이 아니면 null
-export const bowRange = (def, tile) => (def?.type === 'bow' ? BOW.rangeTiles * tile : null);
+// 원거리 무기 사거리(px): 활 4.5칸·지팡이(27차) 5칸. 근접 무기면 null
+export const RANGED = { bow: BOW, staff: STAFF };
+export const bowRange = (def, tile) => (RANGED[def?.type] ? RANGED[def.type].rangeTiles * tile : null);
+// 27차: 능력치 이름(마법사는 str = '지능'). 저장·계산 키는 그대로
+export const STAT_NAMES = { str: '힘', dex: '민첩', con: '체력' };
+export const statName = (k, bal) => bal?.statNames?.[k] ?? STAT_NAMES[k] ?? k;

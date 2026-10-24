@@ -1,6 +1,6 @@
 // 게임 화면: 지도, 기사, 몬스터·보스, NPC, 전투, 자동 사냥. 숫자 계산은 모두 domain 모듈에 맡긴다.
 // 시간: 전투·무적·재생성·땅 아이템·보스 방 초기화는 게임 시계(this.gt, 멈추면 안 흐름), 보스 재등장만 실제 시각(Date.now).
-import { BOW } from '../../data/balance.js';
+import { RANGED } from '../domain/classes.js'; // 26차 활·27차 지팡이 사거리
 import { bal } from '../cbal.js'; // 26차: 지금 캐릭터 직업으로 본 밸런스(게임 시작 때 정함)
 import { clsOf, className } from '../domain/classes.js';
 import { buildWorld, TILE, W, H, mapIdAt, regionName, inBossRoom, BOSS_ROOMS, bossRoomOf, NPCS, TINTS, REGIONS } from '../../data/maps.js';
@@ -81,13 +81,15 @@ const ratesOf = (save) => save.rates;
 // 칸: 0 서 있기, 1~6 걷기, 7~12 칼 휘두르기. 발끝(그림 아래 끝)이 33px 줄
 const HERO_FRAME = 40;
 const HERO_FEET = 33;
+const WIZARD_FEET = 47; // 27차 마법사 그림 발끝 줄(build.py 출력)
 const HERO_COLS = 13;
 const HERO_IDLE = [0];
 const HERO_WALK = [1, 2, 3, 4, 5, 6];
 const HERO_ATK = [7, 8, 9, 10, 11, 12];
 const HERO_ROW = { down: 0, downRight: 1, right: 2, upRight: 3, up: 4, upLeft: 5, left: 6, downLeft: 7 };
 // 26차: 직업마다 그림(같은 칸 배치: 0 서기·1~6 걷기·7~12 공격, 8방향 줄). 요정 = PixelLab 요정 궁수(그림원본/pixellab_요정궁수/build.py)
-const LOOKS = { knight: { key: 'hero', anim: 'hero', frame: HERO_FRAME, feet: HERO_FEET }, elf: { key: 'hero_elf', anim: 'elf', frame: 56, feet: 47 } };
+// 27차 마법사 = PixelLab 마법사(그림원본/pixellab_마법사/build.py)
+const LOOKS = { knight: { key: 'hero', anim: 'hero', frame: HERO_FRAME, feet: HERO_FEET }, elf: { key: 'hero_elf', anim: 'elf', frame: 56, feet: 47 }, wizard: { key: 'hero_wizard', anim: 'wizard', frame: 56, feet: WIZARD_FEET } };
 const DIR8 = ['right', 'downRight', 'down', 'downLeft', 'left', 'upLeft', 'up', 'upRight'];
 const dir8Of = (dx, dy) => DIR8[((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8];
 const dirOf = (dx, dy) => (Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down');
@@ -100,6 +102,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.image('tiles', 'assets/tiles_ex.png'); // 5차: 둘레 1px 늘린 그림(타일 틈 줄 방지, 도구/타일늘리기.py)
     this.load.spritesheet('hero', 'assets/hero.png', { frameWidth: HERO_FRAME, frameHeight: HERO_FRAME });
     this.load.spritesheet('hero_elf', 'assets/hero_elf.png', { frameWidth: LOOKS.elf.frame, frameHeight: LOOKS.elf.frame });
+    this.load.spritesheet('hero_wizard', 'assets/hero_wizard.png', { frameWidth: LOOKS.wizard.frame, frameHeight: LOOKS.wizard.frame });
     this.load.image('sword', 'assets/sword.png');
     this.load.image('coin', 'assets/coin.png');
     this.load.image('ult_sword', 'assets/ult_sword.png'); // 9차 성검 강림(PixelLab)
@@ -131,6 +134,10 @@ export class WorldScene extends Phaser.Scene {
     const ag = this.add.graphics();
     ag.fillStyle(0x6b4a2a).fillRect(0, 1, 9, 1); ag.fillStyle(0xe8e8f0).fillRect(9, 0, 2, 3); ag.fillStyle(0xffffff).fillRect(0, 0, 2, 1).fillRect(0, 2, 2, 1);
     ag.generateTexture('arrow', 11, 3); ag.destroy();
+    // 27차 마법 구슬(마법사 지팡이): 빛나는 구슬 하나(색은 쏠 때 tint)
+    const bg = this.add.graphics();
+    bg.fillStyle(0x6fa8ff, 0.35).fillCircle(5, 5, 5); bg.fillStyle(0xa8d0ff, 0.8).fillCircle(5, 5, 3); bg.fillStyle(0xffffff).fillCircle(5, 5, 1.5);
+    bg.generateTexture('bolt', 10, 10); bg.destroy();
     // 칼은 기사 그림에 들어 있어 따로 그리지 않는다(예전 칼 그림은 숨김)
     this.sword = this.add.image(0, 0, 'sword').setVisible(false);
     this.swinging = false;
@@ -355,7 +362,7 @@ export class WorldScene extends Phaser.Scene {
       const fr = (cols) => cols.map((c) => ({ key: look.key, frame: row * HERO_COLS + c }));
       this.anims.create({ key: `${look.anim}_idle_${d}`, frames: fr(HERO_IDLE), frameRate: 3, repeat: -1 });
       this.anims.create({ key: `${look.anim}_run_${d}`, frames: fr(HERO_WALK), frameRate: 10, repeat: -1 });
-      this.anims.create({ key: `${look.anim}_atk_${d}`, frames: fr(HERO_ATK), frameRate: look === LOOKS.elf ? 18 : 22, repeat: 0 });
+      this.anims.create({ key: `${look.anim}_atk_${d}`, frames: fr(HERO_ATK), frameRate: look === LOOKS.knight ? 22 : 18, repeat: 0 });
     }
     this.anims.create({ key: 'fx_return', frames: this.anims.generateFrameNumbers('fx_return'), frameRate: 14 });
     for (const [id, key] of Object.entries(MON_KEYS)) mk(key, id);
@@ -900,7 +907,7 @@ export class WorldScene extends Phaser.Scene {
     this.smoke(this.knight.x, this.knight.y - 6, 1);
     this.cameras.main.flash(200, 255, 236, 180);
     this.floatText(this.knight.x, this.knight.y - 24, `${d.name}!`, '#ffd36a', 1500);
-    hud.log(`<b style="color:#ffd36a">${d.name}(으)로 변신</b> — ${d.desc} · 덤 ${rollText(roll)} · 20분`);
+    hud.log(`<b style="color:#ffd36a">${d.name}(으)로 변신</b> — ${d.desc} · 덤 ${rollText(roll, bal)} · 20분`);
   }
   // 자동 사냥 중 변신이 시간이 다 돼 풀렸고, 단축 칸에 변신 주문서가 있으면 마지막 변신으로 다시(⑤ #13: 직접 풀었으면 안 함, 3초에 한 번만 시도)
   autoMorph() {
@@ -993,11 +1000,13 @@ export class WorldScene extends Phaser.Scene {
   dist(m) { return Math.hypot(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y) - (m.reach || 0); }
 
   // 26차 활(⑤ #13·#14): 사거리 = 기사와 같은 '중심 거리 − 몸 크기'로 BOW.rangeTiles칸. 쏘는 줄(발 → 몬스터 발)이 막힌 칸을 지나면 못 쏨
-  bowOn() {
+  // 27차: 원거리 무기 계열(활·지팡이) 정의 또는 null
+  rangedOn() {
     const s = G.save, it = s?.bag.find((i) => i.uid === s.equip.weapon);
-    return !!it && itemDef(it.id, bal)?.type === 'bow';
+    return (it && RANGED[itemDef(it.id, bal)?.type]) ?? null;
   }
-  reach() { return this.bowOn() ? BOW.rangeTiles * TILE : ATTACK_RANGE; }
+  bowOn() { return this.rangedOn()?.type === 'bow'; }
+  reach() { const r = this.rangedOn(); return r ? r.rangeTiles * TILE : ATTACK_RANGE; }
   clearLine(m) { return this.shotClear(this.knight.x, this.knight.y, m.sprite.x, m.sprite.y); }
   // ⑦ #5: 선분이 지나는 칸을 차례로(Amanatides–Woo). 모서리를 정확히 지나면 맞닿은 두 칸도 본다. 시작·끝 칸은 빼고 본다(서 있는 칸)
   shotClear(x0, y0, x1, y1) { // (길찾기의 lineClear와 다른 함수 — 이름 겹치지 않게)
@@ -1017,17 +1026,20 @@ export class WorldScene extends Phaser.Scene {
     return true;
   }
   // 이 거리 안에서 칠 수 있나(근접 거리면 줄 검사 없음 — 기사와 같은 판정)
-  inShot(m, range) { const d = this.dist(m); return d <= range && (d <= ATTACK_RANGE || this.clearLine(m)); }
+  // 27차 ⑤ #4: 활·지팡이는 가까워도 쏘는 줄을 본다(근접 무기만 근접 거리에서 줄 검사 생략 — 기사 판정 그대로)
+  // 27차 ⑦ #1: line = 사격 스킬(윈드 샷·라이트닝) — 든 무기와 상관없이 늘 줄 검사
+  closeOk(d, line = false) { return d <= ATTACK_RANGE && !line && !this.rangedOn(); }
+  inShot(m, range, line = false) { const d = this.dist(m); return d <= range && (this.closeOk(d, line) || this.clearLine(m)); }
 
   // 보스는 기사도 방 안에 있을 때만 때릴 수 있다(방 밖에서 일방적으로 치기 방지)
   canHit(m) { return m.alive && (!m.def.isBoss || inBossRoom(this.knight.x, this.knight.y)?.id === m.id); }
 
-  nearestMonster(range) {
+  nearestMonster(range, line = false) {
     let best = null, bd = range;
     for (const m of this.monsters) {
       if (!this.canHit(m)) continue;
       const d = this.dist(m);
-      if (d <= bd && (d <= ATTACK_RANGE || this.clearLine(m))) { bd = d; best = m; } // 26차: 벽 뒤는 건너뛰고 쏠 수 있는 것 중 가장 가까운 것
+      if (d <= bd && (this.closeOk(d, line) || this.clearLine(m))) { bd = d; best = m; } // 26차: 벽 뒤는 건너뛰고 쏠 수 있는 것 중 가장 가까운 것
     }
     return best;
   }
@@ -1102,7 +1114,7 @@ export class WorldScene extends Phaser.Scene {
     this.attackCd = this.stats().attackMs / 1000;
     this.refreshSkills(true);
   }
-  pickTarget(target, range) { return target && this.canHit(target) && this.inShot(target, range) ? target : this.nearestMonster(range); }
+  pickTarget(target, range, line = false) { return target && this.canHit(target) && this.inShot(target, range, line) ? target : this.nearestMonster(range, line); }
   stunMon(m, ms) { m.stunUntil = Math.max(m.stunUntil ?? 0, this.gt + ms); this.stunFx(m); }
 
   // 방어 스킬: 막기·회복·아머·반격(대상 필요 없음)
@@ -1199,14 +1211,15 @@ export class WorldScene extends Phaser.Scene {
   }
   skillDash(def, target, manual) {
     const range = def.rangeTiles * TILE;
-    const m = this.pickTarget(target, range);
+    const m = this.pickTarget(target, range, !!def.shot);
     if (!m) { if (manual) hud.toast(def.shot ? '쏠 수 있는 몬스터가 없습니다' : '돌진할 몬스터가 없습니다'); return false; }
     // 26차 요정 윈드 샷(shot): 움직이지 않고 그 자리에서 멀리 쏜다(⑤ #11)
     if (def.shot) {
+      const [tn, tc] = clsOf(G.save) === 'wizard' ? [0xd8e4ff, '#d8e4ff'] : [0x9fffe0, '#9fffe0']; // 27차 라이트닝은 번개 빛
       this.spendAttack(def);
-      this.swingAt(m, 0x9fffe0);
-      this.fx.title(this.knight.x, this.knight.y - 28, def.name, '#9fffe0');
-      this.strike(m, def.mult, '#9fffe0');
+      this.swingAt(m, tn);
+      this.fx.title(this.knight.x, this.knight.y - 28, def.name, tc);
+      this.strike(m, def.mult, tc);
       return true;
     }
     const land = this.dashLanding(m);
@@ -2077,7 +2090,9 @@ export class WorldScene extends Phaser.Scene {
     this.hero.play(key);
     this.hero.once('animationcomplete', this.onSwingDone, this);
     // 26차: 활이면 화살이 대상까지 날아간다(보기만 — 피해는 쏘는 순간 strike가 정함)
-    if (this.bowOn()) { this.shootArrow(m, fxTint); return; }
+    const ranged = this.rangedOn();
+    if (ranged?.type === 'staff') { this.shootBolt(m, fxTint); return; } // 27차 마법 구슬
+    if (ranged) { this.shootArrow(m, fxTint); return; }
     // 몸: 대상 쪽으로 반 발짝 내딛었다 돌아옴
     this.tweens.killTweensOf(this.lunge);
     this.lunge.x = 0; this.lunge.y = 0;
@@ -2094,6 +2109,17 @@ export class WorldScene extends Phaser.Scene {
     const a = this.add.image(x0, y0, 'arrow').setDepth(950).setRotation(ang);
     if (tint) a.setTint(tint);
     this.tweens.add({ targets: a, x: x1, y: y1, duration: Math.max(60, d * 2.2), onComplete: () => a.destroy() });
+  }
+
+  // 27차: 지팡이 마법 구슬 — 대상까지 날아가 작게 터진다(보기만, 피해는 strike가 정함)
+  shootBolt(m, tint) {
+    const x0 = this.knight.x, y0 = this.knight.y - 16, x1 = m.sprite.x, y1 = m.sprite.y - (m.def.isBoss ? 14 : 6);
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    const b = this.add.image(x0, y0, 'bolt').setDepth(950).setBlendMode(Phaser.BlendModes.ADD);
+    if (tint) b.setTint(tint);
+    this.tweens.add({ targets: b, x: x1, y: y1, duration: Math.max(80, d * 2.6), onComplete: () => {
+      this.tweens.add({ targets: b, scale: 2.2, alpha: 0, duration: 140, onComplete: () => b.destroy() });
+    } });
   }
 
   onSwingDone(anim) { if (anim?.key?.startsWith(`${this.hk}_atk_`)) this.swinging = false; }

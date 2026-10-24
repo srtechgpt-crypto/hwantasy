@@ -379,6 +379,27 @@ export const SWORD_TO_BOW = Object.fromEntries([
   ...BOW_ROWS.filter(([sid]) => weapons.find(w => w.id === sid).tier).map(([sid, id]) => [`${sid}_r`, `${id}_r`]),
   ...BOW_ROWS.filter(([sid]) => (weapons.find(w => w.id === sid).tier ?? 0) >= 4).flatMap(([sid, id]) => [[`${sid}_h`, `${id}_h`], [`${sid}_l`, `${id}_l`]]),
 ]);
+// 27차 마법사: 지팡이(type 'staff', 원거리 마법, pierce = 몬스터 방어를 그 % 만큼 무시). 활과 같은 방식으로 같은 등급 검 정의를 바탕으로 만든다.
+// 모든 지팡이 = p27(v18 이하 기록에는 없음). 활 다음에 넣어 앞 목록(희귀·영웅·전설 풀·드랍 표·도감)이 그대로 [가정]
+export const STAFF = { type: 'staff', key: 'Staff', noun: '지팡이', dmgPct: -25, rangeTiles: 5, pierce: 50, desc: '멀리서 마법 · 몬스터 방어 절반 무시 · 마법사만' };
+WEAPON_TYPES.push(STAFF);
+const STAFF_ROWS = [['woodSword', 'woodStaff', '나무 지팡이'], ['ironSword', 'ironStaff', '철 지팡이'], ['steelSword', 'steelStaff', '강철 지팡이'], ['deepSword', 'deepStaff', '깊은돌 지팡이'],
+  ['mithrilSword', 'mithrilStaff', '미스릴 지팡이'], ['wraithSword', 'wraithStaff', '망령 지팡이'], ['frostSword', 'frostStaff', '서리강 지팡이'], ['drakeSword', 'drakeStaff', '용비늘 지팡이']];
+const staffOf = (b, id, name) => {
+  const { p21: _p21, type: _type, ...rest } = b;
+  return { ...rest, id, name, type: 'staff', dmgPct: STAFF.dmgPct, pierce: STAFF.pierce, p27: true };
+};
+const staves = STAFF_ROWS.map(([sid, id, name]) => staffOf(weapons.find(w => w.id === sid), id, name));
+const rareStaves = staves.filter(d => d.tier).map(d => ({ ...rareOf(d), p27: true }));
+// 영웅·전설 지팡이 = 대검·도끼처럼 치명 %p(마력 폭주) [가정]
+const rankStaves = staves.filter(d => d.tier >= 4).flatMap(d => ['hero', 'legend'].map(r => ({ ...rankOf({ ...d, type: 'twohand', crit: 0 }, r), type: 'staff', dmgPct: STAFF.dmgPct, pierce: STAFF.pierce, p27: true })).map(({ p23: _p23, ...d2 }) => d2));
+weapons.push(...staves, ...rareStaves, ...rankStaves);
+// 마법사 보기에서 검 드랍을 같은 등급 지팡이로 바꾸는 표(난수 쓰는 횟수 그대로)
+export const SWORD_TO_STAFF = Object.fromEntries([
+  ...STAFF_ROWS.map(([sid, id]) => [sid, id]),
+  ...STAFF_ROWS.filter(([sid]) => weapons.find(w => w.id === sid).tier).map(([sid, id]) => [`${sid}_r`, `${id}_r`]),
+  ...STAFF_ROWS.filter(([sid]) => (weapons.find(w => w.id === sid).tier ?? 0) >= 4).flatMap(([sid, id]) => [[`${sid}_h`, `${id}_h`], [`${sid}_l`, `${id}_l`]]),
+]);
 // 26차 직업. 기사 = 지금 밸런스 그대로(skills·passives·knight·stats·start). 요정은 classBal(src/domain/classes.js)이 이 값으로 바꿔 끼운다.
 // 스킬 id는 기사와 같다(단축 칸·스킬 레벨·카드·자동 사냥이 그대로) — 이름·숫자·설명·아이콘만 요정 것 [가정]
 const ELF_SKILLS = {
@@ -400,14 +421,42 @@ const ELF_PASSIVES = [
   { id: 'p_e4', name: '바람의 손', level: 27, atkPct: 5, desc: '공격 간격 -5%' },
   { id: 'p_e5', name: '자연의 가호', level: 38, lowHpReduce: 0.2, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -20%' },
 ];
+// 27차 마법사: 스킬 id·레벨·종류는 기사와 같고 이름·숫자·설명만(라이트닝 = 요정 윈드 샷처럼 제자리 사격) [가정]
+const WIZARD_SKILLS = {
+  bash: { name: '에너지 볼트', short: '볼트', mult: 2.2, desc: '마력 화살 — 2.2배 피해' },
+  block: { name: '매직 실드', short: '실드', desc: '8초 동안 공격을 40% 확률로 마력 방패가 막음' },
+  dash: { name: '라이트닝', short: '번개', mult: 1.8, rangeTiles: 6, shot: true, desc: '6칸 안 적에게 번개 1.8배 피해' },
+  stun: { name: '프로즌 클라우드', short: '얼음', stunMs: 2500, desc: '1.2배 피해 + 2.5초 얼림(보스 제외)' },
+  quake: { name: '콘 오브 콜드', short: '냉기', mult: 1.6, radiusTiles: 4, arcDeg: 70, desc: '앞쪽 4칸 부채꼴 1.6배 피해 + 1.5초 느려짐' },
+  heal: { name: '그레이터 힐', short: '힐', healPct: 30, desc: '최대 체력의 30% 즉시 회복' },
+  whirl: { name: '파이어 스톰', short: '화염', mult: 1.1, radiusTiles: 3, desc: '둘레 3칸 모든 적에게 불기둥 1.1배' },
+  ult: { name: '미티어 스트라이크', short: '운석', mult: 4.5, radiusTiles: 4, desc: '필살기: 둘레 4칸 4.5배 피해 + 1초 기절' },
+  guard: { name: '마나 실드', short: '마나', reduce: 0.25, desc: '20초 동안 받는 피해 25% 감소' },
+  counter: { name: '파이어 실드', short: '불꽃', desc: '10초 동안 받은 피해의 절반을 불꽃으로 되돌려줌' },
+};
+const WIZARD_PASSIVES = [
+  { id: 'p_w1', name: '마력 집중', level: 3, critPct: 6, desc: '치명타 6% (피해 1.5배)' },
+  { id: 'p_w2', name: '마나 순환', level: 12, hpPct: 5, desc: '최대 체력 +5%' },
+  { id: 'p_w3', name: '마법 갑옷', level: 18, def: 1, desc: '방어 +1' },
+  { id: 'p_w4', name: '빠른 영창', level: 27, atkPct: 6, desc: '공격 간격 -6%' },
+  { id: 'p_w5', name: '마나 보호막', level: 38, lowHpReduce: 0.25, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -25%' },
+];
 const CLASSES = {
-  knight: { name: '기사', desc: '튼튼한 근접 전사 · 검·대검·도끼·창·단검', noWeapon: ['bow'] },
+  knight: { name: '기사', desc: '튼튼한 근접 전사 · 검·대검·도끼·창·단검', noWeapon: ['bow', 'staff'] },
   elf: {
-    name: '요정', desc: '멀리서 활을 쏘는 궁수 · 민첩이 높음', noWeapon: ['twohand', 'axe'],
+    name: '요정', desc: '멀리서 활을 쏘는 궁수 · 민첩이 높음', noWeapon: ['twohand', 'axe', 'staff'],
     skills: ELF_SKILLS, passives: ELF_PASSIVES,
     base: { baseHp: 70, hpPerLevel: 13 },
     stats: { str: [1, 3], dex: [1, 1], con: [1, 3] }, // 시뮬레이터 2회: 활 −15%·민첩 1/레벨 → 레벨 50까지 30.1h(기사 힘 28.6h) [가정]
     start: { weapon: 'woodBow' },
+  },
+  // 27차 마법사: 지팡이 마법(방어 무시)·체력 낮음. 첫째 능력치(str 키)를 '지능'이라 부른다(저장·계산은 str 그대로) [가정 — 시뮬레이터로 맞춤]
+  wizard: {
+    name: '마법사', desc: '멀리서 마법을 쏘는 마법사 · 지팡이·검·단검', noWeapon: ['twohand', 'axe', 'spear', 'bow'],
+    skills: WIZARD_SKILLS, passives: WIZARD_PASSIVES, statNames: { str: '지능' },
+    base: { baseHp: 60, hpPerLevel: 11 },
+    stats: { str: [1, 1], dex: [1, 3], con: [1, 3] },
+    start: { weapon: 'woodStaff' },
   },
 };
 export default {

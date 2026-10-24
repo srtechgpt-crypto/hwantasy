@@ -33,7 +33,9 @@ import { balForSave, classBal, canWield, isClassId } from './classes.js';
 // 17 = 2026-10-23 25차: 25차 아이템(p25: 경갑·로브·이름난 장비)·이름난 장비 도감 세트(p25). 16 → 17은 v16 규칙(p25 없음)으로 검사 후 버전만
 // 18 = 2026-10-24 26차: 캐릭터 여러 명(save.hero = 지금 캐릭터 {cid, cls, name}, save.roster = 쉬는 캐릭터 묶음, 최대 6명)·창고 돈 save.wgold·
 //      직업(기사·요정)·활(p26). 17 → 18은 v17 규칙(활 없음)으로 검사한 뒤 hero 기사·roster []·wgold 0만 더한다
-export const SAVE_VERSION = 18;
+// 19 = 2026-10-24 27차: 직업 마법사(hero.cls 'wizard')·지팡이(p27). 모양은 v18 그대로 — 옛 앱이 마법사 기록을 '손상'으로 읽지 않게 번호만 올림.
+//      18 → 19는 v18 규칙(no27: 지팡이·마법사 없음)으로 검사한 뒤 버전만
+export const SAVE_VERSION = 19;
 const KEYS = ['hwantasy.A', 'hwantasy.B'];
 export const V1_BACKUP_KEY = 'hwantasy.v1backup';
 export const V2_BACKUP_KEY = 'hwantasy.v2backup';
@@ -51,8 +53,9 @@ export const V13_BACKUP_KEY = 'hwantasy.v13backup';
 export const V14_BACKUP_KEY = 'hwantasy.v14backup';
 export const V15_BACKUP_KEY = 'hwantasy.v15backup';
 export const V16_BACKUP_KEY = 'hwantasy.v16backup';
+export const V18_BACKUP_KEY = 'hwantasy.v18backup'; // 27차
 export const V17_BACKUP_KEY = 'hwantasy.v17backup'; // 26차 ⑤ #4: 저장 구조가 크게 바뀌므로 v16·v17 원문도 보관해야만 덮어쓴다
-const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY, 8: V8_BACKUP_KEY, 9: V9_BACKUP_KEY, 10: V10_BACKUP_KEY, 11: V11_BACKUP_KEY, 12: V12_BACKUP_KEY, 13: V13_BACKUP_KEY, 14: V14_BACKUP_KEY, 15: V15_BACKUP_KEY, 16: V16_BACKUP_KEY, 17: V17_BACKUP_KEY };
+const BACKUP_KEYS = { 1: V1_BACKUP_KEY, 2: V2_BACKUP_KEY, 3: V3_BACKUP_KEY, 4: V4_BACKUP_KEY, 5: V5_BACKUP_KEY, 6: V6_BACKUP_KEY, 7: V7_BACKUP_KEY, 8: V8_BACKUP_KEY, 9: V9_BACKUP_KEY, 10: V10_BACKUP_KEY, 11: V11_BACKUP_KEY, 12: V12_BACKUP_KEY, 13: V13_BACKUP_KEY, 14: V14_BACKUP_KEY, 15: V15_BACKUP_KEY, 16: V16_BACKUP_KEY, 17: V17_BACKUP_KEY, 18: V18_BACKUP_KEY };
 // v3 보스 키(고정). 보스를 더 늘리면 버전을 올리고 변환을 추가한다
 export const V3_BOSSES = ['boss', 'lich'];
 export const V15_BOSSES = ['boss', 'lich', 'drake']; // 21차
@@ -177,8 +180,17 @@ export const no26 = b => {
   const { classes: _classes, ...rest } = b;
   return { ...rest, weapons: b.weapons.filter(def => !def.p26) };
 };
+// 27차: v18 이하 규칙 = 지팡이(p27)·마법사 없음(여러 번 써도 같음). 기사 밸런스 드랍 표에는 지팡이가 없다
+export const no27 = b => {
+  if (!b.weapons.some(def => def.p27) && !b.classes?.wizard) return b;
+  const out = { ...b, weapons: b.weapons.filter(def => !def.p27) };
+  if (b.classes?.wizard) { const { wizard: _wizard, ...classes } = b.classes; out.classes = classes; }
+  return out;
+};
 export const balFor = (bal, version) => {
   bal = bal?.classBase ?? bal; // ⑤ #8: 직업 보기를 넘겨도 원래 밸런스에서 고른다
+  if (version === 19) return bal;
+  bal = no27(bal); // 27차: 18 이하는 모두 지팡이·마법사 없음
   return version === 18 ? bal : version === 17 ? no26(bal) : version === 16 ? no26(no25(bal)) : version === 15 ? no26(no25(no23(bal))) : no26(no25(no23(no21(balFor14(bal, version)))));
 };
 const balFor12 = (bal, version) => (version === 12 ? bal
@@ -272,11 +284,13 @@ export const V18_ONLY = ['hero', 'roster', 'wgold'];
 export const charPart = save => Object.fromEntries(CHAR_ALL.filter(k => Object.hasOwn(save, k)).map(k => [k, save[k]]));
 // 이름: 앞뒤·가운데 공백 없이 1~8글자(코드 포인트), 제어 문자 없음(가져오기가 공백을 지우므로 공백은 받지 않는다)
 export const heroNameOk = name => typeof name === 'string' && /^[^\s\p{Cc}]+$/u.test(name) && [...name].length >= 1 && [...name].length <= 8;
-const validHero = h => isRecord(h) && Object.getPrototypeOf(h) === Object.prototype && Object.keys(h).length === 3 && integer(h.cid, 1, 99) && isClassId(h.cls) && heroNameOk(h.name);
+// 27차: 마법사는 v19부터
+const validHero = (h, version) => isRecord(h) && Object.getPrototypeOf(h) === Object.prototype && Object.keys(h).length === 3 && integer(h.cid, 1, 99) && isClassId(h.cls) && (h.cls !== 'wizard' || version >= 19) && heroNameOk(h.name);
 // 26차 ⑤ #3: v18 = 계정 검사(명단 모양·창고 돈·캐릭터 번호·이름) + 캐릭터마다 기존 검사(그 직업 밸런스로, 창고는 첫 캐릭터 보기에서 한 번) + 전체 uid 검사
 export function validate(save, bal, version = SAVE_VERSION) {
   bal = bal?.classBase ?? bal;
-  if (version < 18 || !isRecord(save) || save.version !== 18) return validateOne(save, bal, version);
+  if (version < 18 || !isRecord(save) || save.version !== version) return validateOne(save, bal, version); // 27차: v18·v19 모두 계정 검사
+  if (version < 19) bal = no27(bal);
   const errors = [], bad = message => errors.push(message);
   const roster = save.roster;
   if (!Array.isArray(roster) || roster.length > (bal.maxChars ?? 6) - 1) return { ok: false, errors: ['캐릭터 명단이 올바르지 않습니다'] };
@@ -286,12 +300,12 @@ export function validate(save, bal, version = SAVE_VERSION) {
     if (!isRecord(c) || Object.getPrototypeOf(c) !== Object.prototype || Object.keys(c).some(k => !CHAR_ALL.includes(k)) || CHAR_KEYS.some(k => !Object.hasOwn(c, k))) return { ok: false, errors: [...errors, '명단 캐릭터 형식이 올바르지 않습니다'] };
   }
   const chars = [charPart(save), ...roster];
-  if (!chars.every(c => validHero(c.hero))) return { ok: false, errors: [...errors, '캐릭터 정보(번호·직업·이름)가 올바르지 않습니다'] };
+  if (!chars.every(c => validHero(c.hero, version))) return { ok: false, errors: [...errors, '캐릭터 정보(번호·직업·이름)가 올바르지 않습니다'] };
   if (new Set(chars.map(c => c.hero.cid)).size !== chars.length) bad('캐릭터 번호가 겹칩니다');
   if (new Set(chars.map(c => c.hero.name)).size !== chars.length) bad('캐릭터 이름이 겹칩니다');
   const shared = Object.fromEntries(Object.entries(save).filter(([k]) => !CHAR_ALL.includes(k) && k !== 'roster'));
   chars.forEach((c, i) => {
-    const r = validateOne({ ...shared, ...c, warehouse: i === 0 ? save.warehouse : [] }, classBal(bal, c.hero.cls), 18);
+    const r = validateOne({ ...shared, ...c, warehouse: i === 0 ? save.warehouse : [] }, classBal(bal, c.hero.cls), version);
     for (const e of r.errors) bad(i === 0 ? e : `${c.hero.name}: ${e}`);
   });
   // 모든 가방 + 창고의 uid는 서로 겹치지 않고, nextUid는 그 전부보다 크다
@@ -311,6 +325,7 @@ function validateOne(save, bal, version) {
   if (version < 16 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no23(bal); // 23차: 같은 방식
   if (version < 17 && Array.isArray(bal?.weapons) && Array.isArray(bal.monsters)) bal = no25(bal); // 25차 ⑤ #3: 새 도감 세트도 함께
   if (version < 18 && Array.isArray(bal?.weapons)) bal = no26(bal); // 26차 ⑤ #5
+  if (version < 19 && Array.isArray(bal?.weapons)) bal = no27(bal); // 27차
   const errors = [];
   const bad = message => errors.push(message);
   if (!isRecord(save)) return { ok: false, errors: ['저장은 객체여야 합니다'] };
@@ -356,6 +371,7 @@ function validateOne(save, bal, version) {
       if (def.p23 && version < 16) bad('옛 버전 기록에 23차 아이템이 있습니다'); // 23차
       if (def.p25 && version < 17) bad('옛 버전 기록에 25차 아이템이 있습니다'); // 25차
       if (def.p26 && version < 18) bad('옛 버전 기록에 26차 아이템이 있습니다'); // 26차
+      if (def.p27 && version < 19) bad('옛 버전 기록에 27차 아이템이 있습니다'); // 27차
       if (!integer(item.count, 1, gear ? 1 : bal.inventory.stackMax)) bad('아이템 수량이 올바르지 않습니다');
       if (gear ? !integer(item.enchant, 0, enchantRule(def, bal).max) : item.enchant !== undefined) bad('아이템 강화 단계가 올바르지 않습니다');
       // 13차: 잠금은 v9 장비에만, 값은 true만(없으면 안 잠김)
@@ -628,14 +644,23 @@ function v17to18(save, bal) {
   next.wgold = 0;
   return next;
 }
+// 18→19(27차): v18 규칙(지팡이·마법사 없음)으로 검사한 뒤 버전만
+function v18to19(save, bal) {
+  const check = validate(save, balFor(bal, 18), 18);
+  if (!check.ok) throw new TypeError(`버전 18 저장 검사 실패: ${check.errors.join('; ')}`);
+  const next = clone(save);
+  next.version = 19;
+  return next;
+}
 // 25차: 모든 경로가 마지막에 v16→17을 지난다(v16까지는 23차 경로 그대로). 26차: 그 뒤 v17→18
 export function migrate(save, bal = defaultBalance) {
   if (!isRecord(save)) throw new TypeError('지원하지 않는 저장 버전입니다');
   bal = bal?.classBase ?? bal;
   if (save.version === SAVE_VERSION) return clone(save);
-  if (save.version === 17) return v17to18(save, bal);
-  if (save.version === 16) return v17to18(v16to17(save, bal), bal);
-  return v17to18(v16to17(migrateTo16(save, bal), bal), bal);
+  if (save.version === 18) return v18to19(save, bal);
+  if (save.version === 17) return v18to19(v17to18(save, bal), bal);
+  if (save.version === 16) return v18to19(v17to18(v16to17(save, bal), bal), bal);
+  return v18to19(v17to18(v16to17(migrateTo16(save, bal), bal), bal), bal);
 }
 function migrateTo16(save, bal) {
   if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(save.version)) throw new TypeError('지원하지 않는 저장 버전입니다');

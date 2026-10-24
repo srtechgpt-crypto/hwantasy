@@ -16,8 +16,14 @@ export function finalDamage(base, { mult = 1, crit = false, dmgPct = 0 }, bal) {
   const pct = Math.round(mult * 100) * (crit ? Math.round(c.critMult * 100) : 100) * (100 + dmgPct);
   return Math.max(c.minDamage, Math.floor((base * pct) / 1000000));
 }
+// 27차: stats.pierce(지팡이 마법, 0~100 정수 %)만큼 몬스터 방어를 덜 뺀다 — q = floor(방어/나눗수), 빼는 값 = q − floor(q × pierce/100).
+// pierce 0(검·활 등)이면 26차와 같은 값. 평타·스킬·장비 비교(dpsOf)가 모두 이 함수
+export const defCut = (monDef, stats, bal) => {
+  const q = Math.floor(monDef / bal.combat.monsterDefDivisor), p = stats.pierce ?? 0;
+  return p > 0 ? q - Math.floor((q * p) / 100) : q;
+};
 export const baseDamage = (die, stats, monDef, bal) =>
-  Math.max(bal.combat.minDamage, die + stats.weapon.enchant * bal.combat.weaponEnchantDamage + stats.dmgBonus - Math.floor(monDef / bal.combat.monsterDefDivisor));
+  Math.max(bal.combat.minDamage, die + stats.weapon.enchant * bal.combat.weaponEnchantDamage + stats.dmgBonus - defCut(monDef, stats, bal));
 // 5차: mult(스킬 피해 배수, 기본 1, 소수 둘째 자리까지) — 순서: 명중 판정(빗나가면 0) → 기존 피해(최소 1) → × mult 내림 → 최소 1
 // 9차(⑤ #1·#2): 치명 — stats.critPct가 양수이고 noCrit이 아니면 주사위 다음에 난수 하나 더(없으면 난수를 더 쓰지 않음).
 // 배수는 스킬 배수 × 치명 배수를 백분율 정수로 곱한 뒤 마지막에 한 번만 내림. 난수 호출 수: 빗나감 1 · 치명 없음 2 · 치명 판정 3
