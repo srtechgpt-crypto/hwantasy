@@ -82,6 +82,7 @@ const ratesOf = (save) => save.rates;
 const HERO_FRAME = 40;
 const HERO_FEET = 33;
 const WIZARD_FEET = 47; // 27차 마법사 그림 발끝 줄(build.py 출력)
+const DARKELF_FEET = 47; // 28차 다크엘프 그림 발끝 줄(build.py 출력)
 const HERO_COLS = 13;
 const HERO_IDLE = [0];
 const HERO_WALK = [1, 2, 3, 4, 5, 6];
@@ -89,7 +90,7 @@ const HERO_ATK = [7, 8, 9, 10, 11, 12];
 const HERO_ROW = { down: 0, downRight: 1, right: 2, upRight: 3, up: 4, upLeft: 5, left: 6, downLeft: 7 };
 // 26차: 직업마다 그림(같은 칸 배치: 0 서기·1~6 걷기·7~12 공격, 8방향 줄). 요정 = PixelLab 요정 궁수(그림원본/pixellab_요정궁수/build.py)
 // 27차 마법사 = PixelLab 마법사(그림원본/pixellab_마법사/build.py)
-const LOOKS = { knight: { key: 'hero', anim: 'hero', frame: HERO_FRAME, feet: HERO_FEET }, elf: { key: 'hero_elf', anim: 'elf', frame: 56, feet: 47 }, wizard: { key: 'hero_wizard', anim: 'wizard', frame: 56, feet: WIZARD_FEET } };
+const LOOKS = { knight: { key: 'hero', anim: 'hero', frame: HERO_FRAME, feet: HERO_FEET }, elf: { key: 'hero_elf', anim: 'elf', frame: 56, feet: 47 }, wizard: { key: 'hero_wizard', anim: 'wizard', frame: 56, feet: WIZARD_FEET }, darkelf: { key: 'hero_darkelf', anim: 'darkelf', frame: 56, feet: DARKELF_FEET } }; // 28차 다크엘프(그림원본/pixellab_다크엘프)
 const DIR8 = ['right', 'downRight', 'down', 'downLeft', 'left', 'upLeft', 'up', 'upRight'];
 const dir8Of = (dx, dy) => DIR8[((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8];
 const dirOf = (dx, dy) => (Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down');
@@ -103,6 +104,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.spritesheet('hero', 'assets/hero.png', { frameWidth: HERO_FRAME, frameHeight: HERO_FRAME });
     this.load.spritesheet('hero_elf', 'assets/hero_elf.png', { frameWidth: LOOKS.elf.frame, frameHeight: LOOKS.elf.frame });
     this.load.spritesheet('hero_wizard', 'assets/hero_wizard.png', { frameWidth: LOOKS.wizard.frame, frameHeight: LOOKS.wizard.frame });
+    this.load.spritesheet('hero_darkelf', 'assets/hero_darkelf.png', { frameWidth: LOOKS.darkelf.frame, frameHeight: LOOKS.darkelf.frame });
     this.load.image('sword', 'assets/sword.png');
     this.load.image('coin', 'assets/coin.png');
     this.load.image('ult_sword', 'assets/ult_sword.png'); // 9차 성검 강림(PixelLab)
@@ -549,7 +551,7 @@ export class WorldScene extends Phaser.Scene {
       if (this.monsterBlocked(m, x, y)) continue;
       if (Math.hypot(x - this.knight.x, y - this.knight.y) < (initial ? 5 : 6) * TILE) continue;
       m.sprite.setPosition(x, y).setVisible(true).setAlpha(1);
-      m.hp = m.def.hp; m.alive = true; m.aggro = false; m.cd = 0; m.asleep = false;
+      m.hp = m.def.hp; m.alive = true; m.aggro = false; m.cd = 0; m.asleep = false; m.poison = null;
       m.sprite.play(`${m.id}_walk_down`);
       return;
     }
@@ -579,7 +581,7 @@ export class WorldScene extends Phaser.Scene {
 
   resetBoss(b) {
     if (!b?.alive) return;
-    b.hp = b.def.hp; b.attacks = 0; b.aggro = false;
+    b.hp = b.def.hp; b.attacks = 0; b.aggro = false; b.poison = null; // 28차: 초기화 때 독도
     this.cancelSlam(b);
   }
 
@@ -624,6 +626,8 @@ export class WorldScene extends Phaser.Scene {
     this.drawHero();
 
     this.updateMonsters(dt, now);
+    if (G.pending) return;
+    this.updatePoison(now); // 28차 다크엘프 독
     if (G.pending) return;
     this.updateSlam(now);
     this.updateCasting();
@@ -1059,6 +1063,7 @@ export class WorldScene extends Phaser.Scene {
   // fixed: 회오리처럼 여러 마리를 칠 때 쓰는 순간의 능력치·레벨({stats, level})로 고정(중간 레벨업 영향 없음)
   strike(m, mult = 1, color = '#ffffff', fixed = null) {
     this.face = dirOf(m.sprite.x - this.knight.x, m.sprite.y - this.knight.y);
+    if (!m.alive) return { hit: false, dmg: 0 }; // 28차 ⑤ #7: 이미 쓰러진 대상은 치지 않음
     const st = fixed?.stats ?? this.stats();
     const r = combat.playerAttack(st, m.def, fixed?.level ?? G.save.player.level, this.rng, bal, { mult });
     m.aggro = true;
@@ -1072,7 +1077,35 @@ export class WorldScene extends Phaser.Scene {
     if (r.crit) this.fx.crit(m.sprite.x, m.sprite.y - (m.def.isBoss ? 16 : 0), r.dmg);
     else this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(r.dmg), color);
     if (m.hp <= 0) (m.def.isBoss ? this.killBoss(m) : this.killMonster(m));
+    else this.addPoison(m, combat.poisonOf(r.dmg, st)); // 28차 다크엘프 독(살아남았을 때만)
     return r;
+  }
+
+  // 28차 독(⑤ #4·#5·#8): 진행 중이면 다음 깎는 시각은 그대로 두고 남은 양만 더하고 횟수를 3으로. 새 독이면 1초 뒤부터.
+  addPoison(m, amount) {
+    if (!(amount > 0) || !m.alive) return;
+    if (m.poison) { m.poison.left += amount; m.poison.ticks = 3; }
+    else m.poison = { left: amount, ticks: 3, next: this.gt + 1000 };
+  }
+  // 게임 시계로 1초마다: 남은 양 ÷ 남은 횟수(내림, 마지막은 남은 전부). 밀린 회차는 예정 시각부터 1초씩 차례로.
+  // 쓰러지면 기존 처치 길(killMonster/killBoss)로 한 번만, 저장 대기(G.pending)가 생기면 바로 멈춤(⑤ #6)
+  updatePoison(now) {
+    for (const m of this.monsters) {
+      while (m.poison && m.alive && now >= m.poison.next) {
+        const p = m.poison, d = p.ticks <= 1 ? p.left : Math.floor(p.left / p.ticks);
+        p.left -= d; p.ticks--; p.next += 1000;
+        if (p.ticks <= 0) m.poison = null;
+        if (d <= 0) continue;
+        m.hp -= d; m.hurtAt = this.gt;
+        this.floatText(m.sprite.x, m.sprite.y - (m.def.isBoss ? 30 : 14), String(d), '#7dff6a');
+        if (m.hp <= 0) {
+          m.poison = null;
+          (m.def.isBoss ? this.killBoss(m) : this.killMonster(m));
+          if (G.pending) return;
+        }
+      }
+      if (m.poison && !m.alive) m.poison = null;
+    }
   }
 
   // 23차 흡혈(영웅·전설 검·창): 최대 체력까지만, 쓰러진 뒤엔 안 함
@@ -1373,7 +1406,7 @@ export class WorldScene extends Phaser.Scene {
 
   killMonster(m) {
     if (!m.alive) return; // 같은 처치로 보상이 두 번 나오지 않게
-    m.alive = false;
+    m.alive = false; m.poison = null; // 28차: 독 지움
     m.respawnAt = this.gt + RESPAWN_MS;
     m.sprite.setVisible(false); m.bar.clear();
     m.stunText?.destroy(); m.stunText = null; m.stunUntil = 0;
@@ -1410,7 +1443,7 @@ export class WorldScene extends Phaser.Scene {
   // 보스: 보상 전부 + 처치 시각을 한 후보로 만들어 한 번에 저장(성공해야 확정)
   killBoss(b) {
     if (!b.alive) return; // 12차(⑤ #9): 같은 처치로 보상·처치 수가 두 번 나오지 않게
-    b.alive = false;
+    b.alive = false; b.poison = null; // 28차: 독 지움
     this.cancelSlam(b);
     b.sprite.setVisible(false); b.bar.clear(); b.label.setVisible(false);
     const x = b.sprite.x, y = b.sprite.y;
@@ -1985,7 +2018,8 @@ export class WorldScene extends Phaser.Scene {
             const blockPct = now < this.blockUntil ? this.sk('block').blockPct : 0;
             const r = combat.monsterAttack(m.def, st, G.save.player.level, this.rng, bal, { reduce: this.incomingReduce(now), blockPct });
             let died = false;
-            if (r.blocked) this.fx.blocked(this.knight.x, this.knight.y);
+            if (r.evaded) this.floatText(this.knight.x, this.knight.y - 16, '회피', '#c8a2ff'); // 28차(⑤ #11): MISS보다 먼저
+            else if (r.blocked) this.fx.blocked(this.knight.x, this.knight.y);
             else if (r.hit) died = this.hurtPlayer(r.dmg);
             else this.floatText(this.knight.x, this.knight.y - 16, 'MISS', '#c9c2b0');
             if (died || !G.save || G.save.player.hp <= 0) return;
@@ -2053,7 +2087,7 @@ export class WorldScene extends Phaser.Scene {
     this.smoke(s.x, s.y - 4, 1.2);
     if (Math.hypot(this.knight.x - s.x, this.knight.y - s.y) > s.r) { this.floatText(this.knight.x, this.knight.y - 18, '피했다!', '#9fe08a'); return; }
     if (now < this.invulnUntil) return;
-    const base = combat.monsterAttack(s.b.def, this.stats(), G.save.player.level, () => 0, bal, { reduce: this.incomingReduce(now) }).dmg; // 땅 울림은 막을 수 없음
+    const base = combat.monsterAttack(s.b.def, this.stats(), G.save.player.level, () => 0, bal, { reduce: this.incomingReduce(now), noEvade: true }).dmg; // 땅 울림은 막을 수 없음(28차: 회피도 없음 — 거리로만 피함)
     const dmg = Math.max(1, Math.floor(base * bal.boss.slamMult));
     // ⑦ #2: 땅 울림도 살아남으면 반격(막기는 안 됨)
     if (!this.hurtPlayer(dmg, '#ff3b2f') && now < this.counterUntil && s.b.alive) this.counterHit(s.b, { hit: true, dmg });

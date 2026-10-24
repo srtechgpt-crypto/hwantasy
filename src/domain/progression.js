@@ -120,6 +120,7 @@ export function playerStats(level, equip, bal, bonus = NO_BONUS, extra = null, p
     attackMsRaw: (atkBase * (100 - atkPct) * speed) / 10000,
     minAttackMs: Math.round((st.minAttackMs * speed) / 100),
     dmgPct: wdef?.dmgPct ?? 0,
+    poisonPct: pm.poisonPct, evadePct: pm.evadePct, // 28차 다크엘프 독·회피(combat.monsterAttack·World.strike)
     pierce: wdef?.pierce ?? 0, // 27차 지팡이 마법: 몬스터 방어를 이 % 만큼 무시(combat.baseDamage)
     critPct: pm.critPct + setCrit + (wdef?.crit ?? 0) + gearCrit, lowHpReduce: pm.lowHpReduce, lowHpRatio: pm.lowHpRatio,
     stealPct: wdef?.stealPct ?? 0, // 23차 흡혈(때린 피해의 %, World.strike)

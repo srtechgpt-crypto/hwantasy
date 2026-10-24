@@ -16,12 +16,14 @@ export function knows(level, id, bal) { return level >= skillDef(id, bal).level;
 export function isSkillId(id, bal) { return bal.skills.some(s => s.id === id); }
 
 // 9차 패시브 합계(배운 것만). 반환: critPct(%), hpPct(%), def, atkPct(%), lowHpReduce(0~1), lowHpRatio(0~1)
+// 28차: poisonPct(독, 때린 피해의 %)·evadePct(회피 %) — 다크엘프 패시브만 가짐(다른 직업은 0)
 export function passiveMods(level, bal) {
   assertLevel(level, bal);
-  const out = { critPct: 0, hpPct: 0, def: 0, atkPct: 0, lowHpReduce: 0, lowHpRatio: 0 };
+  const out = { critPct: 0, hpPct: 0, def: 0, atkPct: 0, lowHpReduce: 0, lowHpRatio: 0, poisonPct: 0, evadePct: 0 };
   for (const p of bal.passives ?? []) {
     if (level < p.level) continue;
     out.critPct += p.critPct ?? 0; out.hpPct += p.hpPct ?? 0; out.def += p.def ?? 0; out.atkPct += p.atkPct ?? 0;
+    out.poisonPct += p.poisonPct ?? 0; out.evadePct += p.evadePct ?? 0;
     if (p.lowHpReduce) { out.lowHpReduce += p.lowHpReduce; out.lowHpRatio = Math.max(out.lowHpRatio, p.lowHpRatio); }
   }
   return out;

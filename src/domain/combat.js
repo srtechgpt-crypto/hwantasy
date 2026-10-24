@@ -22,6 +22,8 @@ export const defCut = (monDef, stats, bal) => {
   const q = Math.floor(monDef / bal.combat.monsterDefDivisor), p = stats.pierce ?? 0;
   return p > 0 ? q - Math.floor((q * p) / 100) : q;
 };
+// 28차 독: 맞힌 피해 dmg의 poisonPct% (내림). 0이면 독 없음
+export const poisonOf = (dmg, stats) => (stats?.poisonPct > 0 && dmg > 0 ? Math.floor((dmg * stats.poisonPct) / 100) : 0);
 export const baseDamage = (die, stats, monDef, bal) =>
   Math.max(bal.combat.minDamage, die + stats.weapon.enchant * bal.combat.weaponEnchantDamage + stats.dmgBonus - defCut(monDef, stats, bal));
 // 5차: mult(스킬 피해 배수, 기본 1, 소수 둘째 자리까지) — 순서: 명중 판정(빗나가면 0) → 기존 피해(최소 1) → × mult 내림 → 최소 1
@@ -48,12 +50,17 @@ export function playerAttack(stats, mon, playerLevel, rng, bal, { mult = 1, noCr
 // 5차: reduce(받는 피해 감소율 0 이상 1 미만, 소수 둘째 자리까지) — 순서: 명중 → 기존 피해(최소 1) → × (1 − reduce) 내림 → 최소 1
 // 9차(⑤ #2): blockPct(막기 확률 %, 0~100) — 명중 뒤 난수 하나로 막으면 즉시 피해 0(최소 1 없음). blockPct 0이면 난수를 더 쓰지 않음.
 // reduce는 incomingReduce로 합산·상한을 거친 값
-export function monsterAttack(mon, stats, playerLevel, rng, bal, { reduce = 0, blockPct = 0 } = {}) {
+// 28차: 회피 — stats.evadePct가 양수이고 noEvade가 아니면 명중 뒤 난수 하나로 피함({hit:false, dmg:0, evaded:true}), 그다음 막기.
+// evadePct 0이면 난수를 더 쓰지 않음(기사·요정·마법사 그대로). 보스 땅 울림처럼 고정 난수로 부르는 곳은 noEvade
+export function monsterAttack(mon, stats, playerLevel, rng, bal, { reduce = 0, blockPct = 0, noEvade = false } = {}) {
   check(stats, mon, playerLevel, bal);
   if (!finite(reduce) || reduce < 0 || reduce >= 1) throw new RangeError('피해 감소율이 올바르지 않습니다');
   if (!finite(blockPct) || blockPct < 0 || blockPct > 100) throw new RangeError('막기 확률이 올바르지 않습니다');
   const c = bal.combat;
   if (random(rng) >= chance(c.monsterHit, mon.level - playerLevel, c)) return { hit: false, dmg: 0 };
+  const evadePct = noEvade ? 0 : stats.evadePct ?? 0;
+  if (!finite(evadePct) || evadePct < 0 || evadePct > 100) throw new RangeError('회피 확률이 올바르지 않습니다');
+  if (evadePct > 0 && random(rng) < evadePct / 100) return { hit: false, dmg: 0, evaded: true };
   if (blockPct > 0 && random(rng) < blockPct / 100) return { hit: true, dmg: 0, blocked: true };
   // 8차: stats.def에 모든 방어구(강화 포함)와 레벨·체력 방어가 이미 들어 있다 — 한 번만 뺀다
   const dmg = Math.max(c.minDamage, mon.atk - stats.def);

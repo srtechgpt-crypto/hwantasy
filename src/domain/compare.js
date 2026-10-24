@@ -7,7 +7,7 @@ import { elixirExtra, sumExtra } from './growth.js';
 import { playerStats } from './progression.js';
 import { applyBuffs } from './buffs.js';
 import { applyMorph, morphExtra } from './morph.js';
-import { baseDamage, finalDamage } from './combat.js';
+import { baseDamage, finalDamage, poisonOf } from './combat.js';
 import { permOf } from './collect.js';
 import { balForSave, canWield, clsOf } from './classes.js';
 
@@ -44,7 +44,9 @@ export function dpsOf(stats, level, bal) {
   let sum = 0;
   for (let d = w.min; d <= w.max; d++) {
     const base = baseDamage(d, stats, ref.def, bal);
-    sum += (1 - cp) * finalDamage(base, { dmgPct }, bal) + cp * finalDamage(base, { crit: true, dmgPct }, bal);
+    // 28차 ⑤ #12: 독은 갈래마다 D + floor(D × 독%) (독 0이면 그대로)
+    const n = finalDamage(base, { dmgPct }, bal), c = finalDamage(base, { crit: true, dmgPct }, bal);
+    sum += (1 - cp) * (n + poisonOf(n, stats)) + cp * (c + poisonOf(c, stats));
   }
   return (hit * sum) / (w.max - w.min + 1) / (stats.attackMs / 1000);
 }

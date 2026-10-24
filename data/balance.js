@@ -400,6 +400,34 @@ export const SWORD_TO_STAFF = Object.fromEntries([
   ...STAFF_ROWS.filter(([sid]) => weapons.find(w => w.id === sid).tier).map(([sid, id]) => [`${sid}_r`, `${id}_r`]),
   ...STAFF_ROWS.filter(([sid]) => (weapons.find(w => w.id === sid).tier ?? 0) >= 4).flatMap(([sid, id]) => [[`${sid}_h`, `${id}_h`], [`${sid}_l`, `${id}_l`]]),
 ]);
+// 28차 다크엘프: 크로우(type 'claw', 검 바탕 — 치명·조금 빠름)·이도류(type 'dual', 단검 바탕 — 단검보다 셈). 근접, 다크엘프만.
+// 모두 p28(v19 이하 기록에는 없음). 지팡이 다음에 넣어 앞 목록(희귀·영웅·전설 풀·드랍 표·도감)이 그대로 [가정 — 시뮬레이터로 맞춤]
+export const CLAW = { type: 'claw', key: 'Claw', noun: '크로우', dmgPct: -10, speedPct: -10, crit: 8, desc: '빠르고 치명 +8% · 다크엘프만' };
+export const DUAL = { type: 'dual', key: 'Dual', noun: '이도류', dmgPct: -15, speedPct: -30, crit: 10, desc: '두 손 단검 · 단검보다 세고 더 빠름 · 다크엘프만' };
+WEAPON_TYPES.push(CLAW, DUAL);
+const CLAW_ROWS = [['woodSword', 'woodClaw', '나무 크로우'], ['ironSword', 'ironClaw', '철 크로우'], ['steelSword', 'steelClaw', '강철 크로우'], ['deepSword', 'deepClaw', '깊은돌 크로우'],
+  ['mithrilSword', 'mithrilClaw', '미스릴 크로우'], ['wraithSword', 'wraithClaw', '망령 크로우'], ['frostSword', 'frostClaw', '서리강 크로우'], ['drakeSword', 'drakeClaw', '용비늘 크로우']];
+const DUAL_ROWS = [['ironDagger', 'ironDual', '철 이도류'], ['steelDagger', 'steelDual', '강철 이도류'], ['deepDagger', 'deepDual', '깊은돌 이도류'],
+  ['mithrilDagger', 'mithrilDual', '미스릴 이도류'], ['frostDagger', 'frostDual', '서리강 이도류']];
+const deOf = (wt, b, id, name) => {
+  const { p21: _p21, type: _type, dmgPct: _d, speedPct: _s, crit: _c, ...rest } = b;
+  return { ...rest, id, name, type: wt.type, dmgPct: wt.dmgPct, speedPct: wt.speedPct, crit: wt.crit, p28: true };
+};
+const claws = CLAW_ROWS.map(([sid, id, name]) => deOf(CLAW, weapons.find(w => w.id === sid), id, name));
+const duals = DUAL_ROWS.map(([sid, id, name]) => deOf(DUAL, weapons.find(w => w.id === sid), id, name));
+// 영웅·전설: 크로우 = 도끼처럼 치명 %p, 이도류 = 단검처럼 간격 −%
+const rankDE = (d, as) => ['hero', 'legend'].map(r => ({ ...rankOf({ ...d, type: as }, r), type: d.type, p28: true })).map(({ p23: _p23, ...d2 }) => d2);
+const deWeapons = [...claws, ...duals];
+weapons.push(...deWeapons,
+  ...deWeapons.filter(d => d.tier).map(d => ({ ...rareOf(d), p28: true })),
+  ...deWeapons.filter(d => d.tier >= 4).flatMap(d => rankDE(d, d.type === 'claw' ? 'axe' : 'dagger')));
+// 다크엘프 보기에서 검 → 크로우, 단검 → 이도류(난수 쓰는 횟수 그대로)
+const swapTable = rows => Object.fromEntries([
+  ...rows.map(([sid, id]) => [sid, id]),
+  ...rows.filter(([sid]) => weapons.find(w => w.id === sid).tier).map(([sid, id]) => [`${sid}_r`, `${id}_r`]),
+  ...rows.filter(([sid]) => (weapons.find(w => w.id === sid).tier ?? 0) >= 4).flatMap(([sid, id]) => [[`${sid}_h`, `${id}_h`], [`${sid}_l`, `${id}_l`]]),
+]);
+export const SWORD_TO_CLAW = { ...swapTable(CLAW_ROWS), ...swapTable(DUAL_ROWS) };
 // 26차 직업. 기사 = 지금 밸런스 그대로(skills·passives·knight·stats·start). 요정은 classBal(src/domain/classes.js)이 이 값으로 바꿔 끼운다.
 // 스킬 id는 기사와 같다(단축 칸·스킬 레벨·카드·자동 사냥이 그대로) — 이름·숫자·설명·아이콘만 요정 것 [가정]
 const ELF_SKILLS = {
@@ -441,10 +469,31 @@ const WIZARD_PASSIVES = [
   { id: 'p_w4', name: '빠른 영창', level: 27, atkPct: 6, desc: '공격 간격 -6%' },
   { id: 'p_w5', name: '마나 보호막', level: 38, lowHpReduce: 0.25, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -25%' },
 ];
+// 28차 다크엘프: 스킬 id·레벨·종류는 기사와 같고 이름·숫자만. 독(poisonPct)·회피(evadePct)는 패시브 [가정]
+const DARKELF_SKILLS = {
+  bash: { name: '섀도 팽', short: '팽', mult: 2.1, desc: '그림자 송곳니 — 2.1배 피해' },
+  block: { name: '드레스 이베이전', short: '이베', desc: '8초 동안 공격을 40% 확률로 흘려 막음' },
+  dash: { name: '섀도 스텝', short: '스텝', mult: 1.7, desc: '4칸 안 적에게 그림자처럼 뛰어들어 1.7배 피해' },
+  stun: { name: '다크 블라인드', short: '블라', desc: '1.2배 피해 + 2초 눈멀게(보스 제외)' },
+  quake: { name: '포이즌 미스트', short: '독안개', mult: 1.4, arcDeg: 100, desc: '앞쪽 부채꼴 1.4배 피해 + 1.5초 느려짐' },
+  heal: { name: '다크 리커버리', short: '회복', desc: '최대 체력의 25% 즉시 회복' },
+  whirl: { name: '블레이드 스톰', short: '스톰', mult: 1.1, desc: '둘레 2.5칸 모든 적 1.1배' },
+  ult: { name: '파이널 번', short: '파이널', mult: 4.2, desc: '필살기: 둘레 3.5칸 4.2배 피해 + 1초 기절' },
+  guard: { name: '섀도 아머', short: '섀도', reduce: 0.28, desc: '20초 동안 받는 피해 28% 감소' },
+  counter: { name: '베놈 리플렉트', short: '리플', desc: '10초 동안 받은 피해의 절반을 되돌려줌' },
+};
+const DARKELF_PASSIVES = [
+  { id: 'p_d1', name: '독 바르기', level: 3, poisonPct: 20, desc: '때린 피해의 20%가 3초 동안 독으로 더 깎임' },
+  { id: 'p_d2', name: '그림자 걸음', level: 12, evadePct: 6, desc: '몬스터 공격을 6% 확률로 피함' },
+  { id: 'p_d3', name: '날카로운 손톱', level: 18, critPct: 5, desc: '치명타 5% (피해 1.5배)' },
+  { id: 'p_d4', name: '더블 브레이크', level: 27, atkPct: 6, desc: '공격 간격 -6%' },
+  { id: 'p_d5', name: '어둠의 가호', level: 38, lowHpReduce: 0.2, lowHpRatio: 0.25, desc: '체력 25% 미만일 때 받는 피해 -20%' },
+];
+const DE_ONLY = ['claw', 'dual'];
 const CLASSES = {
-  knight: { name: '기사', desc: '튼튼한 근접 전사 · 검·대검·도끼·창·단검', noWeapon: ['bow', 'staff'] },
+  knight: { name: '기사', desc: '튼튼한 근접 전사 · 검·대검·도끼·창·단검', noWeapon: ['bow', 'staff', ...DE_ONLY] },
   elf: {
-    name: '요정', desc: '멀리서 활을 쏘는 궁수 · 민첩이 높음', noWeapon: ['twohand', 'axe', 'staff'],
+    name: '요정', desc: '멀리서 활을 쏘는 궁수 · 민첩이 높음', noWeapon: ['twohand', 'axe', 'staff', ...DE_ONLY],
     skills: ELF_SKILLS, passives: ELF_PASSIVES,
     base: { baseHp: 70, hpPerLevel: 13 },
     stats: { str: [1, 3], dex: [1, 1], con: [1, 3] }, // 시뮬레이터 2회: 활 −15%·민첩 1/레벨 → 레벨 50까지 30.1h(기사 힘 28.6h) [가정]
@@ -452,11 +501,19 @@ const CLASSES = {
   },
   // 27차 마법사: 지팡이 마법(방어 무시)·체력 낮음. 첫째 능력치(str 키)를 '지능'이라 부른다(저장·계산은 str 그대로) [가정 — 시뮬레이터로 맞춤]
   wizard: {
-    name: '마법사', desc: '멀리서 마법을 쏘는 마법사 · 지팡이·검·단검', noWeapon: ['twohand', 'axe', 'spear', 'bow'],
+    name: '마법사', desc: '멀리서 마법을 쏘는 마법사 · 지팡이·검·단검', noWeapon: ['twohand', 'axe', 'spear', 'bow', ...DE_ONLY],
     skills: WIZARD_SKILLS, passives: WIZARD_PASSIVES, statNames: { str: '지능' },
     base: { baseHp: 60, hpPerLevel: 11 },
     stats: { str: [1, 1], dex: [1, 3], con: [1, 3] },
     start: { weapon: 'woodStaff' },
+  },
+  // 28차 다크엘프: 크로우·이도류(근접), 독·회피 패시브, 체력은 기사와 요정 사이 [가정 — 시뮬레이터로 맞춤]
+  darkelf: {
+    name: '다크엘프', desc: '독과 회피의 암살자 · 검·단검·크로우·이도류', noWeapon: ['twohand', 'axe', 'spear', 'bow', 'staff'],
+    skills: DARKELF_SKILLS, passives: DARKELF_PASSIVES,
+    base: { baseHp: 75, hpPerLevel: 14 },
+    stats: { str: [1, 2], dex: [1, 2], con: [1, 3] },
+    start: { weapon: 'woodClaw' },
   },
 };
 export default {

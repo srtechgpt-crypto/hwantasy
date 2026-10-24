@@ -3,9 +3,10 @@
 // 기사는 bal 그대로(같은 객체) — 기사 계산·난수·예상 시간 표가 25차와 완전히 같다.
 // 스킬 id는 직업이 달라도 같다(bash·block…): 단축 칸·스킬 레벨·카드·자동 사냥·실행부가 id로 그대로 동작한다.
 import { isRecord } from './common.js';
-import { SWORD_TO_BOW, BOW, SWORD_TO_STAFF, STAFF } from '../../data/balance.js';
+import { SWORD_TO_BOW, BOW, SWORD_TO_STAFF, STAFF, SWORD_TO_CLAW } from '../../data/balance.js';
 
-export const CLASS_IDS = ['knight', 'elf', 'wizard']; // 27차 마법사(v19부터 — save.validHero가 버전으로 거름)
+export const CLASS_IDS = ['knight', 'elf', 'wizard', 'darkelf']; // 27차 마법사(v19부터)·28차 다크엘프(v20부터) — save.validHero가 CLASS_SINCE로 거름
+export const CLASS_SINCE = { wizard: 19, darkelf: 20 };
 export const DEFAULT_CLASS = 'knight';
 export const isClassId = cls => CLASS_IDS.includes(cls);
 export const clsOf = save => (isRecord(save?.hero) && isClassId(save.hero.cls) ? save.hero.cls : DEFAULT_CLASS);
@@ -31,7 +32,7 @@ function makeView(base, cls) {
     : d.elixir && c.statNames?.[d.elixir] ? { ...d, name: `${c.statNames[d.elixir]}의 엘릭서` } : d)); // 27차: 마법사는 '지능의 엘릭서'(같은 아이템)
   // 요정은 검 드랍이 같은 등급 활로 바뀐다(드랍 항목 수·확률은 그대로 — 굴리는 난수 수가 같다)
   // 27차: 마법사는 검 드랍이 같은 등급 지팡이로
-  const table = cls === 'elf' ? SWORD_TO_BOW : cls === 'wizard' ? SWORD_TO_STAFF : null;
+  const table = { elf: SWORD_TO_BOW, wizard: SWORD_TO_STAFF, darkelf: SWORD_TO_CLAW }[cls] ?? null; // 28차: 다크엘프는 검 → 크로우, 단검 → 이도류
   const swap = table ? id => table[id] ?? id : id => id;
   const monsters = base.monsters.map(m => ({ ...m, drops: m.drops.map(d => (d.pool ? { ...d, pool: d.pool.map(swap) } : { ...d, id: swap(d.id) })) }));
   return {

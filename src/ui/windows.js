@@ -861,7 +861,7 @@ export function initWindows() {
     ['con', '체력', '최대 체력·회복·방어가 올라 오래 버팁니다(사냥은 느려짐)'],
   ];
   function viewStats(s) {
-    const clsLine = `<p class="hint">${esc(s.hero?.name ?? '')} · <b>${className(clsOf(s), bal)}</b>${clsOf(s) === 'elf' ? ' — 활을 들면 피해 보너스가 힘 대신 <b>민첩</b>으로 오릅니다' : clsOf(s) === 'wizard' ? ' — 지팡이 마법은 <b>몬스터 방어를 절반 무시</b>하고, 피해 보너스는 <b>지능</b>으로 오릅니다' : ''}</p>`;
+    const clsLine = `<p class="hint">${esc(s.hero?.name ?? '')} · <b>${className(clsOf(s), bal)}</b>${clsOf(s) === 'elf' ? ' — 활을 들면 피해 보너스가 힘 대신 <b>민첩</b>으로 오릅니다' : clsOf(s) === 'wizard' ? ' — 지팡이 마법은 <b>몬스터 방어를 절반 무시</b>하고, 피해 보너스는 <b>지능</b>으로 오릅니다' : clsOf(s) === 'darkelf' ? ` — Lv 3부터 때리면 <b>독</b>, Lv 12부터 <b>회피</b> (지금 독 ${loadoutStats(s, bal).poisonPct}% · 회피 ${loadoutStats(s, bal).evadePct}%)` : ''}</p>`;
     const draft = cur.draft ?? { str: 0, dex: 0, con: 0 };
     const used = draft.str + draft.dex + draft.con, left = inv.unspentPoints(s, bal) - used;
     const now = loadoutStats(s, bal);
